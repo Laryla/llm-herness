@@ -59,6 +59,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       conversationId: entityIdSchema,
       turnId: entityIdSchema,
       stepId: entityIdSchema,
+      toolCallId: z.string().min(1),
     })
     .strict(),
   z
@@ -167,6 +168,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
       turnId: entityIdSchema,
       stepId: entityIdSchema,
       toolId: entityIdSchema,
+      toolCallId: z.string().min(1),
       arguments: z.unknown(),
     })
     .strict(),

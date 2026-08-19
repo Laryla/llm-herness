@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  bindAgentResource,
   createAgent,
   createAgentRunContext,
   type AgentEvent,
@@ -19,8 +20,11 @@ import type { ModelMessage } from "@llm-harness/model-runtime";
 import type { LanguageModel } from "@llm-harness/model-runtime";
 
 import type { PersistenceClient } from "../../infrastructure/database/database.js";
-import type { Prisma } from "../../infrastructure/database/generated/sqlite/client.js";
+import { Prisma } from "../../infrastructure/database/generated/sqlite/client.js";
 import type { ModelSecretStores } from "../models/model-profile-service.js";
+import { ToolRegistryError } from "../tools/tool-registry.js";
+import type { ToolRegistry } from "../tools/tool-registry.js";
+import { workspacePathResourceKey } from "../tools/tool-resources.js";
 import {
   serializeConversation,
   serializeStep,
@@ -61,6 +65,8 @@ interface ActiveTurn {
   readonly shouldGenerateTitle: boolean;
   nextMessageSequence: number;
   readonly stepText: Map<string, string>;
+  readonly stepToolExecutions: Map<string, Array<Record<string, unknown>>>;
+  readonly pendingToolConfirmations: Map<string, string>;
 }
 
 /**
@@ -77,6 +83,7 @@ export class AgentRuntimeGateway implements RuntimeGateway {
   constructor(
     private readonly client: PersistenceClient,
     private readonly stores: ModelSecretStores,
+    private readonly toolRegistry: ToolRegistry,
     private readonly maxSteps = 50,
     private readonly logger: RuntimeLogger = silentLogger,
   ) {}
@@ -110,12 +117,36 @@ export class AgentRuntimeGateway implements RuntimeGateway {
           "queued_messages_not_implemented",
           "Queued Message 将在 Conversation 队列模块中实现",
         );
-      case "tool.confirm":
-      case "tool.reject":
-        throw new RuntimeGatewayError(
-          "tool_confirmation_not_implemented",
-          "工具确认将在 Tool Registry 模块中实现",
-        );
+      case "tool.confirm": {
+        const active = this.requireActiveTurn(command.conversationId, command.turnId);
+        if (
+          active.pendingToolConfirmations.get(command.toolCallId) !== command.stepId ||
+          !active.run.confirmTool(command.toolCallId)
+        ) {
+          throw new RuntimeGatewayError(
+            "tool_confirmation_not_pending",
+            "该 Tool Call 当前不在等待确认",
+            false,
+            command.toolCallId,
+          );
+        }
+        return;
+      }
+      case "tool.reject": {
+        const active = this.requireActiveTurn(command.conversationId, command.turnId);
+        if (
+          active.pendingToolConfirmations.get(command.toolCallId) !== command.stepId ||
+          !active.run.rejectTool(command.toolCallId)
+        ) {
+          throw new RuntimeGatewayError(
+            "tool_confirmation_not_pending",
+            "该 Tool Call 当前不在等待确认",
+            false,
+            command.toolCallId,
+          );
+        }
+        return;
+      }
     }
   }
 
@@ -128,11 +159,14 @@ export class AgentRuntimeGateway implements RuntimeGateway {
         command.conversationId,
       );
     }
-    if (command.toolSelection.toolIds.length > 0) {
-      throw new RuntimeGatewayError(
-        "tools_not_available",
-        "Tool Registry 尚未启用，当前 Turn 不能绑定工具",
-      );
+    let boundTools;
+    try {
+      boundTools = this.toolRegistry.bind(command.toolSelection.toolIds);
+    } catch (error) {
+      if (error instanceof ToolRegistryError && error.code === "tool_not_found") {
+        throw new RuntimeGatewayError(error.code, error.message);
+      }
+      throw error;
     }
     const conversation = await this.client.conversation.findUnique({
       where: { id: command.conversationId },
@@ -175,7 +209,8 @@ export class AgentRuntimeGateway implements RuntimeGateway {
           userMessage: command.content,
           modelSelectionSnapshot: command.modelSelection,
           modelParametersSnapshot: command.modelParameters,
-          toolBindingSnapshot: { tools: [] },
+          toolBindingSnapshot:
+            boundTools.snapshot as unknown as Prisma.InputJsonValue,
           instructionsSnapshot: conversation.instructions,
           maxIterations: this.maxSteps,
         },
@@ -202,6 +237,7 @@ export class AgentRuntimeGateway implements RuntimeGateway {
     const model = createOpenAIModel(modelConfiguration, { logger: this.logger });
     const agent = createAgent({
       model,
+      tools: boundTools.tools,
       ...(conversation.instructions.length > 0
         ? {
             systemMessage: {
@@ -216,6 +252,9 @@ export class AgentRuntimeGateway implements RuntimeGateway {
     });
     const context = createAgentRunContext({
       runId: turnId,
+      resources: [
+        bindAgentResource(workspacePathResourceKey, conversation.workspace.path),
+      ],
       metadata: {
         conversationId: conversation.id,
         workspacePath: conversation.workspace.path,
@@ -240,6 +279,8 @@ export class AgentRuntimeGateway implements RuntimeGateway {
         conversation.titleSource === "temporary" && previousTurnCount === 0,
       nextMessageSequence: nextMessageSequence + 1,
       stepText: new Map(),
+      stepToolExecutions: new Map(),
+      pendingToolConfirmations: new Map(),
     };
     this.activeByConversation.set(conversation.id, active);
     this.activeByTurn.set(turnId, active);
@@ -503,6 +544,7 @@ export class AgentRuntimeGateway implements RuntimeGateway {
           },
         });
         active.stepText.set(event.stepId, "");
+        active.stepToolExecutions.set(event.stepId, []);
         this.publish({
           type: "step.created",
           conversationId: active.conversationId,
@@ -537,6 +579,62 @@ export class AgentRuntimeGateway implements RuntimeGateway {
         });
         return;
       }
+      case "tool.confirmation.requested": {
+        let toolArguments: unknown;
+        try {
+          toolArguments = JSON.parse(event.toolCall.arguments) as unknown;
+        } catch {
+          toolArguments = event.toolCall.arguments;
+        }
+        active.pendingToolConfirmations.set(event.toolCall.id, event.stepId);
+        await this.client.toolConfirmation.create({
+          data: {
+            id: createEntityId("confirmation"),
+            stepId: event.stepId,
+            toolCallId: event.toolCall.id,
+            toolId: event.toolId,
+            status: "pending",
+            arguments:
+              toolArguments === null
+                ? Prisma.JsonNull
+                : (toolArguments as Prisma.InputJsonValue),
+          },
+        });
+        this.publish({
+          type: "tool.confirmation_requested",
+          conversationId: active.conversationId,
+          turnId: active.turnId,
+          stepId: event.stepId,
+          toolId: event.toolId,
+          toolCallId: event.toolCall.id,
+          arguments: toolArguments,
+        });
+        return;
+      }
+      case "tool.confirmation.resolved":
+        active.pendingToolConfirmations.delete(event.toolCall.id);
+        await this.client.toolConfirmation.update({
+          where: {
+            stepId_toolCallId: {
+              stepId: event.stepId,
+              toolCallId: event.toolCall.id,
+            },
+          },
+          data: { status: event.decision, decidedAt: new Date() },
+        });
+        return;
+      case "tool.completed": {
+        const executions = active.stepToolExecutions.get(event.stepId) ?? [];
+        executions.push({
+          toolId: event.toolId,
+          toolCallId: event.toolCall.id,
+          modelName: event.toolCall.name,
+          arguments: event.toolCall.arguments,
+          result: event.result,
+        });
+        active.stepToolExecutions.set(event.stepId, executions);
+        return;
+      }
       case "step.completed": {
         const completedAt = new Date();
         const content = active.stepText.get(event.stepId) ?? "";
@@ -545,7 +643,11 @@ export class AgentRuntimeGateway implements RuntimeGateway {
             where: { id: event.stepId },
             data: {
               status: "completed",
-              output: { content, toolCallCount: event.toolCallCount },
+              output: {
+                content,
+                toolCallCount: event.toolCallCount,
+                toolExecutions: active.stepToolExecutions.get(event.stepId) ?? [],
+              } as unknown as Prisma.InputJsonValue,
               completedAt,
               ...(event.usage
                 ? { usage: event.usage as unknown as Prisma.InputJsonValue }

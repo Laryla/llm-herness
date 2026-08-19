@@ -11,6 +11,10 @@ import { ModelProfileService } from "./modules/models/model-profile-service.js";
 import type { RuntimeGateway } from "./modules/runtime/runtime-gateway.js";
 import { AgentRuntimeGateway } from "./modules/runtime/agent-runtime-gateway.js";
 import { registerRuntimeRoutes } from "./modules/runtime/runtime-routes.js";
+import { createBuiltinTools } from "./modules/tools/builtin-tools.js";
+import { ToolRegistry } from "./modules/tools/tool-registry.js";
+import { registerToolRoutes } from "./modules/tools/tool-routes.js";
+import { ToolService } from "./modules/tools/tool-service.js";
 import { registerWorkspaceRoutes } from "./modules/workspaces/workspace-routes.js";
 
 export interface CreateAppOptions {
@@ -35,6 +39,7 @@ export interface CreateAppOptions {
 
 export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: options.logger ?? false });
+  const toolRegistry = new ToolRegistry(createBuiltinTools());
   // WebSocket 插件必须先于所有路由注册，才能正确接管 Upgrade 请求。
   void app.register(fastifyWebsocket, { options: { maxPayload: 1_048_576 } });
 
@@ -44,6 +49,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       ? new AgentRuntimeGateway(
           options.database.client,
           options.secretStores,
+          toolRegistry,
           options.maxSteps ?? 50,
           app.log,
         )
@@ -76,6 +82,10 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   if (options.database) {
     app.addHook("onClose", async () => options.database?.disconnect());
     if (options.database.client) {
+      registerToolRoutes(
+        app,
+        new ToolService(options.database.client, toolRegistry),
+      );
       registerConversationRoutes(
         app,
         new ConversationService(options.database.client, app.log),

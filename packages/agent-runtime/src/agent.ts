@@ -18,9 +18,14 @@ import {
   hasPendingMessages,
   type AgentRunContext,
 } from "./context.js";
+import { ToolConfirmationController } from "./confirmation.js";
 import { AsyncEventQueue } from "./event-queue.js";
 import type { AgentEvent, AgentRunError, AgentRunResult } from "./events.js";
-import type { AgentTool, ToolExecutionResult } from "./tool.js";
+import {
+  AgentToolError,
+  type AgentTool,
+  type ToolExecutionResult,
+} from "./tool.js";
 
 export interface AgentLogger {
   info(context: Record<string, unknown>, message: string): void;
@@ -46,6 +51,8 @@ export interface AgentRun {
   readonly events: AsyncIterable<AgentEvent>;
   readonly result: Promise<AgentRunResult>;
   abort(reason?: string): void;
+  confirmTool(toolCallId: string): boolean;
+  rejectTool(toolCallId: string): boolean;
 }
 
 export interface Agent {
@@ -102,7 +109,14 @@ export function createAgent(options: CreateAgentOptions): Agent {
   return Object.freeze({
     run(input: AgentRunInput): AgentRun {
       const queue = new AsyncEventQueue<AgentEvent>();
-      const result = executeAgentRun(configuration, input, queue).finally(() => {
+      const confirmations = new ToolConfirmationController();
+      const result = executeAgentRun(
+        configuration,
+        input,
+        queue,
+        confirmations,
+      ).finally(() => {
+        confirmations.close();
         closeRunContext(input.context);
         queue.close();
       });
@@ -110,6 +124,10 @@ export function createAgent(options: CreateAgentOptions): Agent {
         events: queue,
         result,
         abort: (reason?: string) => abortRunContext(input.context, reason),
+        confirmTool: (toolCallId: string) =>
+          confirmations.decide(toolCallId, "confirmed"),
+        rejectTool: (toolCallId: string) =>
+          confirmations.decide(toolCallId, "rejected"),
       });
     },
   });
@@ -135,6 +153,7 @@ async function executeAgentRun(
   configuration: AgentConfiguration,
   input: AgentRunInput,
   queue: AsyncEventQueue<AgentEvent>,
+  confirmations: ToolConfirmationController,
 ): Promise<AgentRunResult> {
   let sequence = 0;
   let stepCount = 0;
@@ -229,9 +248,38 @@ async function executeAgentRun(
 
       for (const toolCall of toolCalls) {
         throwIfAborted(input.context.signal);
-        emit({ type: "tool.started", stepId, toolCall });
-        const result = await executeTool(toolCall, configuration.toolsByName, input.context);
-        emit({ type: "tool.completed", stepId, toolCall, result });
+        const tool = configuration.toolsByName.get(toolCall.name);
+        const toolId = tool?.id ?? "tool_unknown";
+        let rejected = false;
+        if (tool?.policy === "requires_confirmation") {
+          emit({
+            type: "tool.confirmation.requested",
+            stepId,
+            toolId,
+            toolCall,
+          });
+          const decision = await confirmations.wait(toolCall, input.context.signal);
+          emit({
+            type: "tool.confirmation.resolved",
+            stepId,
+            toolId,
+            toolCall,
+            decision,
+          });
+          rejected = decision === "rejected";
+        }
+        let result: ToolExecutionResult;
+        if (rejected) {
+          result = toolFailure("tool_rejected", "用户拒绝执行工具", false);
+        } else {
+          emit({ type: "tool.started", stepId, toolId, toolCall });
+          result = await executeTool(
+            toolCall,
+            configuration.toolsByName,
+            input.context,
+          );
+        }
+        emit({ type: "tool.completed", stepId, toolId, toolCall, result });
         messages.push({
           role: "tool",
           toolCallId: toolCall.id,
@@ -336,6 +384,9 @@ async function executeTool(
   try {
     output = await tool.execute(input, context);
   } catch (error) {
+    if (error instanceof AgentToolError) {
+      return toolFailure(error.code, error.message, error.retryable);
+    }
     const message = error instanceof Error ? error.message : "工具执行失败";
     return toolFailure("tool_execution_failed", message, true);
   }

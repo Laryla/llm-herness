@@ -102,6 +102,8 @@ describe("Agent Runtime", () => {
   it("按模型返回顺序执行多个工具，并把结果交给下一次模型调用", async () => {
     const executionOrder: string[] = [];
     const tools: AgentTool[] = ["first", "second"].map((name) => ({
+      id: `tool_${name}`,
+      policy: "automatic",
       definition: { name, description: name, inputSchema: { type: "object" } },
       execute: vi.fn((input) => {
         executionOrder.push(name);
@@ -140,6 +142,8 @@ describe("Agent Runtime", () => {
 
   it("把工具失败转换成 Tool Result，而不是终止 Run", async () => {
     const tool: AgentTool = {
+      id: "tool_fail",
+      policy: "automatic",
       definition: { name: "fail", description: "失败工具", inputSchema: {} },
       execute: () => Promise.reject(new Error("执行失败")),
     };
@@ -169,6 +173,8 @@ describe("Agent Runtime", () => {
       markToolStarted = resolve;
     });
     const tool: AgentTool = {
+      id: "tool_wait",
+      policy: "automatic",
       definition: { name: "wait", description: "等待", inputSchema: {} },
       async execute() {
         markToolStarted?.();
@@ -221,6 +227,8 @@ describe("Agent Runtime", () => {
       toolResponse([{ id: "call_repeat", name: "repeat", arguments: "{}" }]),
     );
     const tool: AgentTool = {
+      id: "tool_repeat",
+      policy: "automatic",
       definition: { name: "repeat", description: "重复", inputSchema: {} },
       execute: () => Promise.resolve("继续"),
     };

@@ -52,13 +52,28 @@ export type AgentEvent =
       readonly usage?: TokenUsage;
     })
   | (AgentEventBase & {
+      readonly type: "tool.confirmation.requested";
+      readonly stepId: string;
+      readonly toolId: string;
+      readonly toolCall: ToolCall;
+    })
+  | (AgentEventBase & {
+      readonly type: "tool.confirmation.resolved";
+      readonly stepId: string;
+      readonly toolId: string;
+      readonly toolCall: ToolCall;
+      readonly decision: "confirmed" | "rejected";
+    })
+  | (AgentEventBase & {
       readonly type: "tool.started";
       readonly stepId: string;
+      readonly toolId: string;
       readonly toolCall: ToolCall;
     })
   | (AgentEventBase & {
       readonly type: "tool.completed";
       readonly stepId: string;
+      readonly toolId: string;
       readonly toolCall: ToolCall;
       readonly result: ToolExecutionResult;
     })
