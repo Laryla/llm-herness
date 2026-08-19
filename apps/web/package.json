@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "@llm-harness/contracts": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "lucide-react": "^1.31.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
