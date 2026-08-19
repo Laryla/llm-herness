@@ -8,7 +8,7 @@ import { PrismaClient as PostgresqlPrismaClient } from "./generated/postgresql/c
 import { PrismaClient as SqlitePrismaClient } from "./generated/sqlite/client.js";
 
 type DatabaseConfig = ServerConfig["database"];
-type PersistenceClient = InstanceType<typeof SqlitePrismaClient>;
+export type PersistenceClient = InstanceType<typeof SqlitePrismaClient>;
 
 function createClient(config: DatabaseConfig): PersistenceClient {
   switch (config.provider) {

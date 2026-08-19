@@ -5,6 +5,7 @@ import { loadConfig } from "./config.js";
 import { initializeHarnessHome } from "./harness-home.js";
 import { createDatabase } from "./infrastructure/database/database.js";
 import { migrateDatabase } from "./infrastructure/database/migrate.js";
+import { initializeWorkspaces } from "./modules/workspaces/workspace-service.js";
 
 const config = loadConfig();
 const staticRoot = fileURLToPath(new URL("../../web/dist", import.meta.url));
@@ -59,6 +60,9 @@ try {
     { databaseProvider: database.provider },
     "数据库连接与健康检查完成",
   );
+
+  await initializeWorkspaces(database.client, harnessHomePaths.defaultWorkspace);
+  console.info("默认 Workspace 与 Current Workspace 初始化完成");
 
   const runningApp = createApp({ database, logger: true, staticRoot });
   app = runningApp;

@@ -10,7 +10,7 @@
     "db:migrate:mysql": "prisma migrate deploy --config prisma/mysql/prisma.config.ts",
     "db:migrate:postgresql": "prisma migrate deploy --config prisma/postgresql/prisma.config.ts",
     "test:integration": "bash scripts/test-databases.sh",
-    "dev": "tsx --env-file-if-exists=../../.env watch src/main.ts",
+    "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
     "start": "node --env-file-if-exists=../../.env dist/main.js",
     "typecheck": "yarn db:generate && tsc -p tsconfig.json"
   },

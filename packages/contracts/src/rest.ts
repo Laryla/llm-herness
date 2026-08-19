@@ -72,6 +72,9 @@ export const workspaceResponseSchema = createSuccessEnvelopeSchema(workspaceSche
 export const workspaceListResponseSchema = createSuccessEnvelopeSchema(
   z.array(workspaceSchema),
 );
+export const currentWorkspaceResponseSchema = createSuccessEnvelopeSchema(
+  currentWorkspaceSchema.nullable(),
+);
 export const modelProfileResponseSchema = createSuccessEnvelopeSchema(
   modelProfileSchema,
 );

@@ -1,11 +1,15 @@
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 
+import type { PersistenceClient } from "./infrastructure/database/database.js";
+import { registerWorkspaceRoutes } from "./modules/workspaces/workspace-routes.js";
+
 export interface CreateAppOptions {
   staticRoot?: string;
   logger?: boolean;
   database?: {
     readonly provider: "sqlite" | "mysql" | "postgresql";
+    readonly client?: PersistenceClient;
     isHealthy(): Promise<boolean>;
     disconnect(): Promise<void>;
   };
@@ -34,6 +38,9 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
   if (options.database) {
     app.addHook("onClose", async () => options.database?.disconnect());
+    if (options.database.client) {
+      registerWorkspaceRoutes(app, options.database.client);
+    }
   }
 
   if (options.staticRoot) {
