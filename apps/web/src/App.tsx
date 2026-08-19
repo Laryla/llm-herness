@@ -1,60 +1,35 @@
+/* eslint-disable no-irregular-whitespace -- 全角空格用于静态原型中的图标与中文标签间距。 */
+import { useState } from "react";
+
+import { useTheme } from "./shared/theme/use-theme.js";
+
+const workspaceChats = {
+  "llm-harness": ["设计 Tool Registry", "模型适配层的接口设计", "Workspace 路径规范", "数据库迁移方案"],
+  "personal-agents": ["整理个人 Agent 指令", "CLI 运行方案"],
+};
+
 export function App() {
-  return (
-    <div className="app-shell">
-      <aside className="sidebar" aria-label="对话导航">
-        <div className="brand-block">
-          <span className="brand-mark" aria-hidden="true">
-            H
-          </span>
-          <div>
-            <h1>LLM Harness</h1>
-            <p>本地模型工作台</p>
-          </div>
-        </div>
-
-        <button className="new-conversation" type="button">
-          <span aria-hidden="true">＋</span>
-          新建对话
-        </button>
-
-        <nav className="conversation-list" aria-label="最近对话">
-          <p className="section-label">最近对话</p>
-          <p className="empty-note">还没有对话</p>
-        </nav>
-
-        <div className="workspace-status">
-          <span className="status-dot" aria-hidden="true" />
-          <div>
-            <span>工作空间</span>
-            <strong>~/.llm</strong>
-          </div>
-        </div>
-      </aside>
-
-      <main className="workspace">
-        <header className="workspace-header">
-          <span>新对话</span>
-          <span className="model-state">尚未选择模型</span>
-        </header>
-
-        <section className="welcome" aria-labelledby="welcome-title">
-          <p className="eyebrow">READY WHEN YOU ARE</p>
-          <h2 id="welcome-title">从一次清晰的提问开始</h2>
-          <p>选择模型后发送消息。每个 Turn 的执行过程都会被完整记录。</p>
-        </section>
-
-        <footer className="composer" aria-label="消息编辑器">
-          <textarea aria-label="消息内容" placeholder="输入消息…" rows={3} />
-          <div className="composer-actions">
-            <button className="model-button" type="button">
-              选择模型
-            </button>
-            <button className="send-button" type="button" disabled>
-              发送
-            </button>
-          </div>
-        </footer>
-      </main>
-    </div>
-  );
+  const [trace, setTrace] = useState(true);
+  const [queueOpen, setQueueOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
+  return <div className={`shell ${trace ? "show-trace" : ""} ${theme === "light" ? "light-theme" : ""}`}>
+    <aside className="sidebar">
+      <header><b className="logo">H</b><h1 aria-label="LLM Harness">Harness</h1><button>•••</button></header>
+      <button aria-label="新建对话" className="new">＋ 新建对话</button>
+      <label className="search">⌕ <input aria-label="搜索对话" placeholder="搜索对话" /></label>
+      <nav className="workspace-groups">{Object.entries(workspaceChats).map(([workspaceName, chats], workspaceIndex) => <section className="workspace-group" key={workspaceName}><header><button className="workspace-name"><i>⌄</i><b>▰</b><span>{workspaceName}</span><small>{chats.length}</small></button><button aria-label={`在 ${workspaceName} 新建对话`} className="workspace-add">＋</button></header><div className="workspace-conversations">{chats.map((chat, index) => <button className={workspaceIndex === 0 && index === 0 ? "active" : ""} key={chat}><span>{chat}</span><i>{index ? "昨天" : "刚刚"}</i></button>)}</div></section>)}</nav>
+      <footer><button className="manage-workspaces">▰　管理工作空间</button><button className="theme-toggle" onClick={toggleTheme}><span>{theme === "dark" ? "☼" : "☾"}　{theme === "dark" ? "浅色主题" : "深色主题"}</span><i>{theme === "dark" ? "Light" : "Dark"}</i></button><button className="open-settings" onClick={() => setSettingsOpen(true)}>⚙　设置</button></footer>
+    </aside>
+    <main>
+      <header className="top"><div><strong>设计 Tool Registry</strong><small>● 已保存</small></div><div><button className="trace-btn" onClick={() => setTrace(!trace)}>ϟ　运行详情</button></div></header>
+      <section className="messages"><div className="column"><div className="time">今天 16:42</div>
+        <section className="turn-block completed"><header className="turn-header"><span>Turn 1</span><small>✓ 已完成 · 2 Steps · 4.1s</small><button onClick={() => setTrace(true)}>查看 Trace</button></header><article><b className="avatar">徐</b><div><header><strong>你</strong><small>16:42</small></header><p>工具应该在什么时候绑定，是服务启动时还是每次对话时？</p></div></article><article><b className="avatar bot">✦</b><div><header><strong>Harness</strong><small>16:42</small></header><p>服务启动时只完成工具注册；真正绑定发生在每次创建 Turn 时。这样每个 Turn 都会保存独立的工具快照，之后修改配置也不会影响历史执行。</p></div></article></section>
+        <section className="turn-block active-turn"><header className="turn-header"><span>Turn 2</span><small>● 等待确认 · Step 1</small><button onClick={() => setTrace(true)}>查看 Trace</button></header><article><b className="avatar">徐</b><div><header><strong>你</strong><small>16:44</small></header><p>可以，帮我把 Tool Registry 的说明写到 <code>docs/tool-registry.md</code>。</p></div></article><article><b className="avatar bot">✦</b><div><header><strong>Harness</strong><small className="running">● 运行中</small></header><p>我会整理注册、Turn 绑定和确认流程，然后写入文档。</p><div className="inline-tool"><header><span><b>⌘</b><strong>写入文件<small>write_text_file</small></strong></span><em>等待确认</em></header><dl><div><dt>路径</dt><dd>docs/tool-registry.md</dd></div><div><dt>操作</dt><dd>创建文件 · 1.8 KB</dd></div></dl><footer><span>此工具将修改当前 Workspace</span><div><button>拒绝</button><button className="confirm">确认执行</button></div></footer></div></div></article></section>
+      </div></section>
+      <footer className="compose-area"><section className={`message-queue ${queueOpen ? "open" : ""}`}><header><button onClick={() => setQueueOpen(!queueOpen)}><i>⌃</i><strong>等待发送</strong><b>2</b></button><span>当前 Turn 结束后按顺序执行</span><button>全部清除</button></header>{queueOpen && <div className="queue-items"><article><b className="drag">⠿</b><span><small>下一条 · Turn 3</small><strong>再补充数据库中的工具快照结构。</strong></span><div><button>转为强制</button><button aria-label="删除第一条等待消息">×</button></div></article><article><b className="drag">⠿</b><span><small>随后 · Turn 4</small><strong>最后为这个模块补充一份使用文档。</strong></span><div><button>转为强制</button><button aria-label="删除第二条等待消息">×</button></div></article></div>}</section><div className="composer"><div className="composer-state"><span><i />Turn 运行中</span><button>■ 停止运行</button></div><textarea aria-label="消息内容" placeholder="输入新消息…" /><div className="composer-toolbar"><div><button className="round-action" aria-label="添加上下文">＋</button><button className="input-model"><b>AI</b><span><small>下个 Turn</small>gpt-4.1</span><i>⌄</i></button></div><div className="send-mode"><span><strong>加入等待队列</strong><small>也可发送为强制消息</small></span><button className="send" aria-label="加入等待队列">↑</button></div></div></div><small className="composer-disclaimer">Enter 加入队列 · ⌘ Enter 强制发送</small></footer>
+    </main>
+    <aside className="trace"><header><div><strong>Turn 2</strong><small>turn_01J5…A82F</small></div><button onClick={() => setTrace(false)}>×</button></header><section className="summary"><b>●　等待工具确认</b><small>已用时 6.7 秒</small><div><span><small>模型快照</small>gpt-4.1</span><span><small>绑定工具</small>2 个</span><span><small>循环上限</small>50</span></div></section><section className="turn-input"><small>用户输入</small><p>可以，帮我把 Tool Registry 的说明写到 docs/tool-registry.md。</p></section><section className="steps"><small>Step 轨迹</small><div className="current-step"><b className="pulse">●</b><span><strong>Step 1 · 模型调用</strong><i>运行中</i><p>模型返回 1 个 Tool Call</p><small>1,248 输入 · 126 输出 tokens</small><div className="trace-tool"><b>⌘</b><span><strong>write_text_file</strong><small>call_8f21 · 等待确认</small></span></div></span></div><div className="future-step"><b>2</b><span><strong>Step 2</strong><i>尚未开始</i><p>确认并执行工具后，结果会进入下一次模型调用。</p></span></div></section><footer><button>打开完整 JSON Trace　→</button></footer></aside>
+    {settingsOpen && <div className="settings-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}><section aria-labelledby="settings-title" aria-modal="true" className="settings-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog"><aside><header><b>H</b><span><strong id="settings-title">设置</strong><small>Harness 配置</small></span></header><nav><button>⌘　模型服务</button><button className="active">⚒　工具注册 <b>2</b></button><button>▰　工作空间</button><button>⚙　运行参数</button></nav><footer><small>Harness v0.1.0</small></footer></aside><main><header><div><strong>工具注册</strong><small>管理 Server 启动时加载的工具</small></div><button aria-label="关闭设置" onClick={() => setSettingsOpen(false)}>×</button></header><section className="settings-content"><div className="settings-heading"><span><strong>已注册工具</strong><small>这些工具可以在创建 Turn 时选择绑定</small></span><button>＋ 注册工具</button></div><div className="registered-tools"><article><b>ϟ</b><span><strong>计算器 <em>内置</em></strong><code>calculator</code><small>计算受限的算术表达式，不执行任意代码。</small></span><div><i>自动执行</i><button>•••</button></div></article><article><b>⌘</b><span><strong>写入文件 <em>内置</em></strong><code>write_text_file</code><small>在当前 Workspace 内创建或覆盖 UTF-8 文本文件。</small></span><div><i className="confirm-policy">需要确认</i><button>•••</button></div></article></div><div className="registry-note"><b>i</b><p><strong>V1 使用静态注册</strong><span>工具随 Server 启动加载。用户上传和动态插件将在后续版本提供。</span></p></div></section></main></section></div>}
+  </div>;
 }
