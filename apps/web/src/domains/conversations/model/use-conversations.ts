@@ -17,6 +17,13 @@ export function useConversations(workspaceId: string | null) {
   const [loadingConversation, setLoadingConversation] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    // Workspace 是 Conversation 的硬边界，切换时不能短暂展示上一个目录的历史。
+    setSelectedId(null);
+    setMessages([]);
+    setTurns([]);
+  }, [workspaceId]);
+
   const reloadList = useCallback(async () => {
     if (!workspaceId) {
       setConversations([]); setSelectedId(null); return;
