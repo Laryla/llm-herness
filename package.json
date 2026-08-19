@@ -11,7 +11,8 @@
     "dev": "yarn workspaces foreach -A -p -i run dev",
     "lint": "eslint .",
     "start": "yarn workspace @llm-harness/server start",
-    "test": "vitest run",
+    "test": "yarn workspace @llm-harness/server db:generate && vitest run",
+    "test:integration": "yarn workspace @llm-harness/server test:integration",
     "typecheck": "yarn workspaces foreach -At run typecheck"
   },
   "devDependencies": {
@@ -22,5 +23,16 @@
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.0.0",
     "vitest": "^3.2.0"
+  },
+  "dependenciesMeta": {
+    "@prisma/engines": {
+      "built": true
+    },
+    "better-sqlite3": {
+      "built": true
+    },
+    "prisma": {
+      "built": true
+    }
   }
 }

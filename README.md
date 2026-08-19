@@ -20,6 +20,7 @@ LLM Harness 是一个本地优先、单用户的大模型运行工作台。它�
 - [领域词汇表](./CONTEXT.md)
 - [V1 产品需求设计](./docs/designs/2026-08-19-v1-product-design.md)
 - [系统架构](./docs/architecture/system-architecture.md)
+- [数据库与 Harness Home](./docs/architecture/database.md)
 - [共享契约](./docs/api/contracts.md)
 - [V1 实施计划](./docs/plans/2026-08-19-v1-implementation-plan.md)
 - [架构决策](./docs/adr/)
@@ -46,6 +47,7 @@ CLI 实现时再新增 `apps/cli/`；Server 私有的数据库、密钥、Tool �
 nvm use
 corepack enable
 yarn install
+cp .env.example .env
 yarn dev
 ```
 
@@ -55,6 +57,7 @@ yarn dev
 yarn typecheck
 yarn lint
 yarn test
+yarn test:integration
 yarn build
 ```
 

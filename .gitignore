@@ -13,3 +13,4 @@ __pycache__/
 !.yarn/versions
 node_modules/
 dist/
+apps/server/src/infrastructure/database/generated/
