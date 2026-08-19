@@ -5,4 +5,11 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+node_modules/
 dist/
