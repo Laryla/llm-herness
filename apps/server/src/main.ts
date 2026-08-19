@@ -83,6 +83,7 @@ try {
   const runningApp = createApp({
     database,
     logger: true,
+    maxSteps: config.maxIterations,
     secretStores: {
       keychain: keychainSecretStore,
       environment: environmentSecretStore,

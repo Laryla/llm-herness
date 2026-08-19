@@ -1,10 +1,14 @@
 import fastifyStatic from "@fastify/static";
+import fastifyWebsocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { PersistenceClient } from "./infrastructure/database/database.js";
 import type { SecretStore } from "./infrastructure/secrets/secret-store.js";
 import { registerModelProfileRoutes } from "./modules/models/model-profile-routes.js";
 import { ModelProfileService } from "./modules/models/model-profile-service.js";
+import type { RuntimeGateway } from "./modules/runtime/runtime-gateway.js";
+import { AgentRuntimeGateway } from "./modules/runtime/agent-runtime-gateway.js";
+import { registerRuntimeRoutes } from "./modules/runtime/runtime-routes.js";
 import { registerWorkspaceRoutes } from "./modules/workspaces/workspace-routes.js";
 
 export interface CreateAppOptions {
@@ -21,10 +25,33 @@ export interface CreateAppOptions {
     readonly environment: SecretStore;
     readonly writable: SecretStore;
   };
+  /** 注入运行网关后启用 `/api/v1/runtime` WebSocket。 */
+  runtimeGateway?: RuntimeGateway;
+  /** 单个 Turn 最多调用模型的次数。 */
+  maxSteps?: number;
 }
 
 export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: options.logger ?? false });
+  // WebSocket 插件必须先于所有路由注册，才能正确接管 Upgrade 请求。
+  void app.register(fastifyWebsocket, { options: { maxPayload: 1_048_576 } });
+
+  const runtimeGateway =
+    options.runtimeGateway ??
+    (options.database?.client && options.secretStores
+      ? new AgentRuntimeGateway(
+          options.database.client,
+          options.secretStores,
+          options.maxSteps ?? 50,
+          app.log,
+        )
+      : undefined);
+  if (runtimeGateway) {
+    void app.register((runtimeApp, _pluginOptions, done) => {
+      registerRuntimeRoutes(runtimeApp, runtimeGateway);
+      done();
+    });
+  }
 
   app.get("/health", async (_request, reply) => {
     if (!options.database) {
