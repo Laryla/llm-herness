@@ -2,6 +2,9 @@ import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { PersistenceClient } from "./infrastructure/database/database.js";
+import type { SecretStore } from "./infrastructure/secrets/secret-store.js";
+import { registerModelProfileRoutes } from "./modules/models/model-profile-routes.js";
+import { ModelProfileService } from "./modules/models/model-profile-service.js";
 import { registerWorkspaceRoutes } from "./modules/workspaces/workspace-routes.js";
 
 export interface CreateAppOptions {
@@ -12,6 +15,11 @@ export interface CreateAppOptions {
     readonly client?: PersistenceClient;
     isHealthy(): Promise<boolean>;
     disconnect(): Promise<void>;
+  };
+  secretStores?: {
+    readonly keychain: SecretStore;
+    readonly environment: SecretStore;
+    readonly writable: SecretStore;
   };
 }
 
@@ -40,6 +48,17 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     app.addHook("onClose", async () => options.database?.disconnect());
     if (options.database.client) {
       registerWorkspaceRoutes(app, options.database.client);
+      if (options.secretStores) {
+        registerModelProfileRoutes(
+          app,
+          new ModelProfileService(
+            options.database.client,
+            options.secretStores,
+            fetch,
+            app.log,
+          ),
+        );
+      }
     }
   }
 

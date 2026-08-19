@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   conversationSchema,
+  createModelProfileRequestSchema,
   modelParametersSchema,
   modelProfileSchema,
   stepSchema,
@@ -47,6 +48,33 @@ describe("领域资源契约", () => {
     ).toBe(false);
     expect(
       modelProfileSchema.safeParse({ ...profile, baseUrl: "not-a-url" }).success,
+    ).toBe(false);
+  });
+
+  it("创建 Model Profile 必须且只能选择一种密钥来源", () => {
+    const base = {
+      displayName: "Local Model",
+      baseUrl: "http://127.0.0.1:11434/v1",
+    };
+    expect(
+      createModelProfileRequestSchema.safeParse({
+        ...base,
+        secretValue: "secret",
+      }).success,
+    ).toBe(true);
+    expect(
+      createModelProfileRequestSchema.safeParse({
+        ...base,
+        secretEnvironmentVariable: "LOCAL_MODEL_KEY",
+      }).success,
+    ).toBe(true);
+    expect(createModelProfileRequestSchema.safeParse(base).success).toBe(false);
+    expect(
+      createModelProfileRequestSchema.safeParse({
+        ...base,
+        secretValue: "secret",
+        secretEnvironmentVariable: "LOCAL_MODEL_KEY",
+      }).success,
     ).toBe(false);
   });
 

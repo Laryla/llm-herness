@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import BetterSqlite3 from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/infrastructure/database/database.js";
@@ -92,7 +92,9 @@ describe("Workspace 管理", () => {
   });
 
   it("目录移动后刷新为 unavailable，并可通过更新路径恢复", async () => {
-    const { database, root, service } = await createTestContext();
+    const { database, root } = await createTestContext();
+    const logger = { info: vi.fn(), warn: vi.fn() };
+    const service = new WorkspaceService(database.client, logger);
     const original = join(root, "original");
     const restored = join(root, "restored");
     await mkdir(original);
@@ -102,6 +104,13 @@ describe("Workspace 管理", () => {
     await expect(service.list()).resolves.toMatchObject([
       { id: workspace.id, status: "unavailable" },
     ]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: workspace.id,
+        status: "unavailable",
+      }),
+      "Workspace 目录不可用",
+    );
     await expect(service.setCurrent(workspace.id)).rejects.toMatchObject({
       code: "invalid_path",
     });

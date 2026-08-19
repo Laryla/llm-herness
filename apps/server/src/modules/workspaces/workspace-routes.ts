@@ -9,6 +9,13 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { PersistenceClient } from "../../infrastructure/database/database.js";
 import { WorkspaceService, WorkspaceServiceError } from "./workspace-service.js";
 
+/*
+ * Workspace REST 传输层。
+ *
+ * 只负责校验请求、调用 WorkspaceService 和生成统一 Envelope；路径、状态及
+ * Current Workspace 的业务规则全部保留在服务层，方便未来 Web/CLI Client 共用。
+ */
+/** 把 Workspace 业务错误转换成稳定的 HTTP 状态码与错误 Envelope。 */
 function sendError(reply: FastifyReply, error: unknown) {
   if (!(error instanceof WorkspaceServiceError)) {
     throw error;
@@ -25,17 +32,20 @@ function sendError(reply: FastifyReply, error: unknown) {
   });
 }
 
+/** 向 Harness Server 注册 Workspace 资源接口和 Current Workspace 接口。 */
 export function registerWorkspaceRoutes(
   app: FastifyInstance,
   client: PersistenceClient,
 ): void {
-  const service = new WorkspaceService(client);
+  const service = new WorkspaceService(client, app.log);
 
+  // 列出全部 Workspace，并同步刷新每个路径的可用状态。
   app.get("/api/v1/workspaces", async () => ({
     apiVersion: API_VERSION,
     data: await service.list(),
   }));
 
+  // 注册新的 Workspace；只保存目录引用，不创建或修改用户目录。
   app.post("/api/v1/workspaces", async (request, reply) => {
     const parsed = createWorkspaceRequestSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -59,6 +69,7 @@ export function registerWorkspaceRoutes(
     }
   });
 
+  // 重命名 Workspace，或在目录移动后重新绑定一个路径。
   app.patch<{ Params: { workspaceId: string } }>(
     "/api/v1/workspaces/:workspaceId",
     async (request, reply) => {
@@ -84,6 +95,7 @@ export function registerWorkspaceRoutes(
     },
   );
 
+  // 删除 Workspace 注册记录；磁盘文件始终保留。
   app.delete<{ Params: { workspaceId: string } }>(
     "/api/v1/workspaces/:workspaceId",
     async (request, reply) => {
@@ -96,11 +108,13 @@ export function registerWorkspaceRoutes(
     },
   );
 
+  // 读取所有 Client 共享的 Current Workspace。
   app.get("/api/v1/current-workspace", async () => ({
     apiVersion: API_VERSION,
     data: await service.getCurrent(),
   }));
 
+  // 切换 Current Workspace；只影响之后的浏览和 Conversation 创建。
   app.put("/api/v1/current-workspace", async (request, reply) => {
     const parsed = setCurrentWorkspaceRequestSchema.safeParse(request.body);
     if (!parsed.success) {

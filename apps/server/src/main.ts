@@ -5,6 +5,11 @@ import { loadConfig } from "./config.js";
 import { initializeHarnessHome } from "./harness-home.js";
 import { createDatabase } from "./infrastructure/database/database.js";
 import { migrateDatabase } from "./infrastructure/database/migrate.js";
+import {
+  EnvironmentSecretStore,
+  selectSecretStore,
+  SystemKeychainSecretStore,
+} from "./infrastructure/secrets/secret-store.js";
 import { initializeWorkspaces } from "./modules/workspaces/workspace-service.js";
 
 const config = loadConfig();
@@ -64,7 +69,27 @@ try {
   await initializeWorkspaces(database.client, harnessHomePaths.defaultWorkspace);
   console.info("默认 Workspace 与 Current Workspace 初始化完成");
 
-  const runningApp = createApp({ database, logger: true, staticRoot });
+  const keychainSecretStore = new SystemKeychainSecretStore();
+  const environmentSecretStore = new EnvironmentSecretStore();
+  const writableSecretStore = await selectSecretStore(
+    keychainSecretStore,
+    environmentSecretStore,
+  );
+  console.info(
+    { secretStoreSource: writableSecretStore.source },
+    "SecretStore 初始化完成",
+  );
+
+  const runningApp = createApp({
+    database,
+    logger: true,
+    secretStores: {
+      keychain: keychainSecretStore,
+      environment: environmentSecretStore,
+      writable: writableSecretStore,
+    },
+    staticRoot,
+  });
   app = runningApp;
   runningApp.log.info({ staticRoot }, "Web 静态资源目录已配置");
 

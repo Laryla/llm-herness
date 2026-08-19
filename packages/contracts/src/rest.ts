@@ -4,6 +4,7 @@ import { apiVersionSchema, entityIdSchema } from "./common.js";
 import { conversationSchema } from "./conversation.js";
 import {
   currentModelSelectionSchema,
+  modelCatalogSchema,
   modelProfileSchema,
   modelSelectionSchema,
 } from "./model.js";
@@ -31,18 +32,44 @@ export const setCurrentWorkspaceRequestSchema = z
   .object({ workspaceId: entityIdSchema })
   .strict();
 
-export const createModelProfileRequestSchema = z
+const modelProfileMutationSchema = z
   .object({
     displayName: z.string().trim().min(1).max(100),
     baseUrl: z.url(),
-    secretValue: z.string().min(1),
+    secretValue: z.string().min(1).optional(),
+    secretEnvironmentVariable: z
+      .string()
+      .regex(/^[A-Z_][A-Z0-9_]{0,127}$/)
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    ({ secretValue, secretEnvironmentVariable }) =>
+      (secretValue === undefined) !== (secretEnvironmentVariable === undefined),
+    { message: "必须且只能提供一种密钥来源" },
+  );
 
-export const updateModelProfileRequestSchema = createModelProfileRequestSchema
-  .omit({ secretValue: true })
-  .partial()
-  .extend({ secretValue: z.string().min(1).optional() })
+export const createModelProfileRequestSchema = modelProfileMutationSchema;
+
+export const updateModelProfileRequestSchema = z
+  .object({
+    displayName: z.string().trim().min(1).max(100).optional(),
+    baseUrl: z.url().optional(),
+    secretValue: z.string().min(1).optional(),
+    secretEnvironmentVariable: z
+      .string()
+      .regex(/^[A-Z_][A-Z0-9_]{0,127}$/)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    ({ secretValue, secretEnvironmentVariable }) =>
+      secretValue === undefined || secretEnvironmentVariable === undefined,
+    { message: "不能同时提供两种密钥来源" },
+  );
+
+export const createManualModelRequestSchema = z
+  .object({ modelName: z.string().trim().min(1).max(200) })
   .strict();
 
 export const setCurrentModelSelectionRequestSchema = z
@@ -78,6 +105,15 @@ export const currentWorkspaceResponseSchema = createSuccessEnvelopeSchema(
 export const modelProfileResponseSchema = createSuccessEnvelopeSchema(
   modelProfileSchema,
 );
+export const modelProfileListResponseSchema = createSuccessEnvelopeSchema(
+  z.array(modelProfileSchema),
+);
+export const modelCatalogResponseSchema = createSuccessEnvelopeSchema(
+  modelCatalogSchema,
+);
+export const currentModelSelectionResponseSchema = createSuccessEnvelopeSchema(
+  currentModelSelectionSchema,
+);
 export const conversationResponseSchema = createSuccessEnvelopeSchema(
   conversationSchema,
 );
@@ -103,6 +139,12 @@ export type UpdateWorkspaceRequest = z.infer<
 >;
 export type CreateModelProfileRequest = z.infer<
   typeof createModelProfileRequestSchema
+>;
+export type UpdateModelProfileRequest = z.infer<
+  typeof updateModelProfileRequestSchema
+>;
+export type CreateManualModelRequest = z.infer<
+  typeof createManualModelRequestSchema
 >;
 export type CreateConversationRequest = z.infer<
   typeof createConversationRequestSchema
