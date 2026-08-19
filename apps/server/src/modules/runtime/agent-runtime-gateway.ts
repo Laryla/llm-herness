@@ -13,14 +13,19 @@ import {
   type ClientCommand,
   type ContractError,
   type ServerEvent,
-  type Turn,
 } from "@llm-harness/contracts";
 import { createOpenAIModel } from "@llm-harness/model-runtime/openai";
 import type { ModelMessage } from "@llm-harness/model-runtime";
+import type { LanguageModel } from "@llm-harness/model-runtime";
 
 import type { PersistenceClient } from "../../infrastructure/database/database.js";
 import type { Prisma } from "../../infrastructure/database/generated/sqlite/client.js";
 import type { ModelSecretStores } from "../models/model-profile-service.js";
+import {
+  serializeConversation,
+  serializeStep,
+  serializeTurn,
+} from "../conversations/conversation-serialization.js";
 import {
   RuntimeGatewayError,
   type RuntimeEventListener,
@@ -51,6 +56,9 @@ interface ActiveTurn {
   readonly turnId: string;
   readonly context: AgentRunContext;
   readonly run: AgentRun;
+  readonly titleModel: LanguageModel;
+  readonly initialUserMessage: string;
+  readonly shouldGenerateTitle: boolean;
   nextMessageSequence: number;
   readonly stepText: Map<string, string>;
 }
@@ -151,6 +159,9 @@ export class AgentRuntimeGateway implements RuntimeGateway {
       where: { conversationId: command.conversationId },
       orderBy: [{ sequence: "asc" }, { id: "asc" }],
     });
+    const previousTurnCount = await this.client.turn.count({
+      where: { conversationId: conversation.id },
+    });
     const nextMessageSequence = (previousMessages.at(-1)?.sequence ?? 0) + 1;
     const turnId = createEntityId("turn");
     const now = new Date();
@@ -223,6 +234,10 @@ export class AgentRuntimeGateway implements RuntimeGateway {
       turnId,
       context,
       run,
+      titleModel: model,
+      initialUserMessage: command.content,
+      shouldGenerateTitle:
+        conversation.titleSource === "temporary" && previousTurnCount === 0,
       nextMessageSequence: nextMessageSequence + 1,
       stepText: new Map(),
     };
@@ -296,6 +311,9 @@ export class AgentRuntimeGateway implements RuntimeGateway {
         await this.persistAndPublishAgentEvent(active, event);
       }
       const result = await active.run.result;
+      if (result.status === "completed" && active.shouldGenerateTitle) {
+        await this.generateConversationTitle(active, result.finalText, result.stepCount);
+      }
       const status =
         result.status === "stopped" ? "limit_reached" : result.status;
       await this.client.turn.update({
@@ -341,6 +359,114 @@ export class AgentRuntimeGateway implements RuntimeGateway {
     } finally {
       this.activeByConversation.delete(active.conversationId);
       this.activeByTurn.delete(active.turnId);
+    }
+  }
+
+  /** 标题生成是非关键 Step；失败只记录 Step，不改变主 Turn 的成功结果。 */
+  private async generateConversationTitle(
+    active: ActiveTurn,
+    assistantText: string,
+    completedStepCount: number,
+  ): Promise<void> {
+    const stepId = createEntityId("step");
+    const sequence = completedStepCount + 1;
+    const startedAt = new Date();
+    const step = await this.client.step.create({
+      data: {
+        id: stepId,
+        turnId: active.turnId,
+        sequence,
+        kind: "title_generation",
+        status: "running",
+        input: { source: "first_turn" },
+        startedAt,
+      },
+    });
+    this.publish({
+      type: "step.created",
+      conversationId: active.conversationId,
+      turnId: active.turnId,
+      step: serializeStep(step),
+    });
+    try {
+      let title = "";
+      for await (const event of active.titleModel.stream({
+        messages: [
+          {
+            role: "system",
+            content:
+              "根据用户问题和助手回答生成一个简洁的中文对话标题。只输出标题，不要引号，不要解释，最多30个字符。",
+          },
+          {
+            role: "user",
+            content: `用户问题：${active.initialUserMessage}\n\n助手回答：${assistantText}`,
+          },
+        ],
+      })) {
+        if (event.type === "text_delta") {
+          title += event.delta;
+          this.publish({
+            type: "step.content_delta",
+            conversationId: active.conversationId,
+            turnId: active.turnId,
+            stepId,
+            delta: event.delta,
+          });
+        }
+      }
+      const normalizedTitle = normalizeGeneratedTitle(title);
+      const completedAt = new Date();
+      const [, conversation] = await this.client.$transaction([
+        this.client.step.update({
+          where: { id: stepId },
+          data: {
+            status: "completed",
+            output: { title: normalizedTitle },
+            completedAt,
+          },
+        }),
+        this.client.conversation.update({
+          where: { id: active.conversationId },
+          data: { title: normalizedTitle, titleSource: "generated" },
+        }),
+      ]);
+      this.publish({
+        type: "step.status_changed",
+        conversationId: active.conversationId,
+        turnId: active.turnId,
+        stepId,
+        status: "completed",
+      });
+      this.publish({
+        type: "conversation.title_changed",
+        conversationId: active.conversationId,
+        conversation: serializeConversation(conversation),
+      });
+    } catch (error) {
+      const completedAt = new Date();
+      await this.client.step.update({
+        where: { id: step.id },
+        data: {
+          status: "failed",
+          completedAt,
+          error: {
+            code: "title_generation_failed",
+            message: "Conversation 标题生成失败",
+            retryable: false,
+          },
+        },
+      });
+      this.publish({
+        type: "step.status_changed",
+        conversationId: active.conversationId,
+        turnId: active.turnId,
+        stepId,
+        status: "failed",
+      });
+      this.logger.warn(
+        { err: error, conversationId: active.conversationId, turnId: active.turnId },
+        "Conversation 标题生成失败",
+      );
     }
   }
 
@@ -479,40 +605,12 @@ function createEntityId(prefix: string): string {
   return `${prefix}_${randomUUID().replaceAll("-", "")}`;
 }
 
-function serializeTurn(record: {
-  id: string;
-  conversationId: string;
-  workspaceId: string;
-  status: string;
-  userMessage: string;
-  modelSelectionSnapshot: unknown;
-  modelParametersSnapshot: unknown;
-  toolBindingSnapshot: unknown;
-  instructionsSnapshot: string;
-  maxIterations: number;
-  error: unknown;
-  createdAt: Date;
-  startedAt: Date | null;
-  completedAt: Date | null;
-  updatedAt: Date;
-}): Turn {
-  return {
-    id: record.id,
-    conversationId: record.conversationId,
-    workspaceId: record.workspaceId,
-    status: record.status as Turn["status"],
-    userMessage: record.userMessage,
-    modelSelection: record.modelSelectionSnapshot as Turn["modelSelection"],
-    modelParameters: record.modelParametersSnapshot as Turn["modelParameters"],
-    toolBinding: record.toolBindingSnapshot as Turn["toolBinding"],
-    instructions: record.instructionsSnapshot,
-    maxIterations: record.maxIterations,
-    ...(record.error ? { error: record.error as ContractError } : {}),
-    createdAt: record.createdAt.toISOString(),
-    ...(record.startedAt ? { startedAt: record.startedAt.toISOString() } : {}),
-    ...(record.completedAt ? { completedAt: record.completedAt.toISOString() } : {}),
-    updatedAt: record.updatedAt.toISOString(),
-  };
+function normalizeGeneratedTitle(value: string): string {
+  const normalized = value.trim().replace(/^["'“”]+|["'“”]+$/g, "");
+  if (normalized.length === 0) {
+    throw new Error("模型返回了空标题");
+  }
+  return Array.from(normalized).slice(0, 30).join("");
 }
 
 function toModelMessage(record: {

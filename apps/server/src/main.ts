@@ -10,6 +10,7 @@ import {
   selectSecretStore,
   SystemKeychainSecretStore,
 } from "./infrastructure/secrets/secret-store.js";
+import { interruptActiveTurns } from "./modules/conversations/conversation-service.js";
 import { initializeWorkspaces } from "./modules/workspaces/workspace-service.js";
 
 const config = loadConfig();
@@ -68,6 +69,8 @@ try {
 
   await initializeWorkspaces(database.client, harnessHomePaths.defaultWorkspace);
   console.info("默认 Workspace 与 Current Workspace 初始化完成");
+  const interrupted = await interruptActiveTurns(database.client);
+  console.info(interrupted, "遗留活动 Turn 与 Step 中断恢复完成");
 
   const keychainSecretStore = new SystemKeychainSecretStore();
   const environmentSecretStore = new EnvironmentSecretStore();

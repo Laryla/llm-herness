@@ -4,6 +4,8 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 import type { PersistenceClient } from "./infrastructure/database/database.js";
 import type { SecretStore } from "./infrastructure/secrets/secret-store.js";
+import { registerConversationRoutes } from "./modules/conversations/conversation-routes.js";
+import { ConversationService } from "./modules/conversations/conversation-service.js";
 import { registerModelProfileRoutes } from "./modules/models/model-profile-routes.js";
 import { ModelProfileService } from "./modules/models/model-profile-service.js";
 import type { RuntimeGateway } from "./modules/runtime/runtime-gateway.js";
@@ -74,6 +76,10 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   if (options.database) {
     app.addHook("onClose", async () => options.database?.disconnect());
     if (options.database.client) {
+      registerConversationRoutes(
+        app,
+        new ConversationService(options.database.client, app.log),
+      );
       registerWorkspaceRoutes(app, options.database.client);
       if (options.secretStores) {
         registerModelProfileRoutes(

@@ -208,11 +208,20 @@ describe("Agent Runtime Gateway", () => {
       ]),
     );
     const turn = await database.client.turn.findFirstOrThrow();
-    const step = await database.client.step.findFirstOrThrow();
+    const steps = await database.client.step.findMany({ orderBy: { sequence: "asc" } });
     const messages = await database.client.message.findMany({ orderBy: { sequence: "asc" } });
+    const conversation = await database.client.conversation.findUniqueOrThrow({
+      where: { id: "conversation_runtime" },
+    });
     expect(turn).toMatchObject({ status: "completed", maxIterations: 8 });
-    expect(step).toMatchObject({ status: "completed", kind: "model" });
-    expect(step.output).toMatchObject({ content: "运行完成" });
+    expect(steps).toHaveLength(2);
+    expect(steps[0]).toMatchObject({ status: "completed", kind: "model" });
+    expect(steps[0]?.output).toMatchObject({ content: "运行完成" });
+    expect(steps[1]).toMatchObject({ status: "completed", kind: "title_generation" });
+    expect(conversation).toMatchObject({
+      title: "运行完成",
+      titleSource: "generated",
+    });
     expect(messages.map(({ role, content }) => [role, content])).toEqual([
       ["user", "开始运行"],
       ["assistant", "运行完成"],

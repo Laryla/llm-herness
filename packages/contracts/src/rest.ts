@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 import { apiVersionSchema, entityIdSchema } from "./common.js";
-import { conversationSchema } from "./conversation.js";
+import { conversationSchema, turnSchema } from "./conversation.js";
+import { messageSchema, traceSchema } from "./message.js";
 import {
   currentModelSelectionSchema,
   modelCatalogSchema,
@@ -117,6 +118,16 @@ export const currentModelSelectionResponseSchema = createSuccessEnvelopeSchema(
 export const conversationResponseSchema = createSuccessEnvelopeSchema(
   conversationSchema,
 );
+export const conversationListResponseSchema = createSuccessEnvelopeSchema(
+  z.array(conversationSchema),
+);
+export const messageListResponseSchema = createSuccessEnvelopeSchema(
+  z.array(messageSchema),
+);
+export const turnListResponseSchema = createSuccessEnvelopeSchema(
+  z.array(turnSchema),
+);
+export const traceResponseSchema = createSuccessEnvelopeSchema(traceSchema);
 
 export const bootstrapResponseSchema = createSuccessEnvelopeSchema(
   z
@@ -148,5 +159,8 @@ export type CreateManualModelRequest = z.infer<
 >;
 export type CreateConversationRequest = z.infer<
   typeof createConversationRequestSchema
+>;
+export type UpdateConversationRequest = z.infer<
+  typeof updateConversationRequestSchema
 >;
 export type BootstrapResponse = z.infer<typeof bootstrapResponseSchema>;
