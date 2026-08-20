@@ -105,6 +105,18 @@ yarn start
   - ToolConfirmation。
 - 分别生成和验证三种 Provider 的迁移。
 - 建立数据库初始化、健康检查和优雅关闭。
+- 将数据库迁移纳入 Harness Server 启动生命周期，用户不需要在 `yarn dev` 或 `yarn start` 前手动执行迁移命令。
+- 启动顺序固定为：
+  1. 加载并校验 Server 配置；
+  2. 初始化 Harness Home；
+  3. Migration Runner 根据启动时确定的 Provider 建立临时迁移连接并执行对应的 `migrate deploy`；
+  4. 迁移完成后关闭临时迁移连接；
+  5. 创建并连接长期使用的业务 Prisma Client；
+  6. 执行数据库健康检查；
+  7. 健康检查通过后才启动 Fastify 监听。
+- 迁移必须幂等；迁移失败或数据库健康检查失败时终止启动，不对外提供 HTTP/WebSocket 服务。
+- `db:generate` 属于安装或构建阶段，不在 Server 运行时生成 Prisma Client。
+- SQLite、MySQL、PostgreSQL 遵循同一启动迁移生命周期；运行期间仍拒绝更换 Provider。
 
 ### 测试
 
@@ -113,6 +125,8 @@ yarn start
 - PostgreSQL 容器集成测试；
 - 三种数据库运行同一套 CRUD、事务、排序与状态迁移契约测试；
 - 验证数据库中没有明文 API Key 字段。
+- 验证空数据库通过 `yarn dev` 与 `yarn start` 启动时能够自动迁移并进入健康状态。
+- 验证迁移失败时 Fastify 不开始监听，且日志不包含数据库密码或完整连接串。
 
 ### 完成标准
 
@@ -132,7 +146,7 @@ yarn start
 ### SecretStore
 
 - 定义 SecretStore 接口。
-- 实现操作系统密钥库适配器和环境变量回退。
+- 实现本地 `config.json` 明文密钥存储和环境变量引用。
 - Model Profile 只持久化 Secret 引用和脱敏值。
 - 日志与错误序列化统一执行密钥清理。
 
