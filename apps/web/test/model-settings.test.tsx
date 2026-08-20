@@ -25,7 +25,7 @@ const failedProfile: ModelProfile = {
 
 function modelState(testConnection = vi.fn().mockResolvedValue(failedProfile)) {
   return {
-    addModel: vi.fn(), catalog: { profileId: failedProfile.id, entries: [], refreshedAt: null }, createProfile: vi.fn(), currentSelection: null,
+    addModel: vi.fn(), catalog: { profileId: failedProfile.id, entries: [{ id: "catalog_test", profileId: failedProfile.id, modelName: "model-a", source: "manual", createdAt: failedProfile.createdAt, updatedAt: failedProfile.updatedAt }], refreshedAt: null }, createProfile: vi.fn(), currentSelection: { profileId: failedProfile.id, modelName: "model-a" },
     error: null, loading: false, profiles: [failedProfile], refreshCatalog: vi.fn(), reload: vi.fn(), saving: false, selectModel: vi.fn(),
     selectedProfileId: failedProfile.id, setSelectedProfileId: vi.fn(), testConnection,
     updateProfile: vi.fn().mockResolvedValue(failedProfile),
@@ -38,7 +38,7 @@ describe("模型连接测试", () => {
     render(<ModelSettings state={modelState(testConnection)} />);
 
     expect(screen.getByText("模型服务返回 HTTP 401")).toBeTruthy();
-    fireEvent.change(screen.getByRole("textbox", { name: "连接测试模型" }), { target: { value: "model-a" } });
+    expect(screen.getAllByText("model-a")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     expect(testConnection).toHaveBeenCalledWith(failedProfile.id, "model-a");
   });
