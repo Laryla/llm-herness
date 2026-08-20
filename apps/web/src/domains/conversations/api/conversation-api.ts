@@ -2,10 +2,12 @@ import {
   conversationSchema,
   messageSchema,
   turnSchema,
+  traceSchema,
   type Conversation,
   type CreateConversationRequest,
   type Message,
   type Turn,
+  type Trace,
 } from "@llm-harness/contracts";
 import { z } from "zod";
 
@@ -33,4 +35,9 @@ export function listMessages(conversationId: string): Promise<Message[]> {
 /** 读取 Conversation 的 Turn 边界与运行状态。 */
 export function listTurns(conversationId: string): Promise<Turn[]> {
   return requestApi(`/api/v1/conversations/${encodeURIComponent(conversationId)}/turns`, z.array(turnSchema));
+}
+
+/** 读取单个 Turn 的完整 Iteration、Step 与 Steering Trace。 */
+export function getTurnTrace(conversationId: string, turnId: string): Promise<Trace> {
+  return requestApi(`/api/v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/trace`, traceSchema);
 }

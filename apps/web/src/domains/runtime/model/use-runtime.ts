@@ -25,28 +25,38 @@ export function useRuntime(onEvent: (event: ServerEvent) => void) {
   onEventRef.current = onEvent;
 
   useEffect(() => {
-    const socket = new WebSocket(runtimeUrl());
-    socketRef.current = socket;
-    setStatus("connecting");
-    socket.addEventListener("open", () => {
-      setStatus("open");
-      socket.send(JSON.stringify({ apiVersion: API_VERSION, commandId: commandId(), type: "runtime.subscribe", afterSequence: lastSequenceRef.current }));
-    });
-    socket.addEventListener("message", (message) => {
-      let payload: unknown;
-      try { payload = JSON.parse(String(message.data)) as unknown; } catch { setError("Runtime 返回了无效 JSON"); return; }
-      const parsed = serverEventSchema.safeParse(payload);
-      if (!parsed.success) {
-        const runtimeError = typeof payload === "object" && payload !== null && "error" in payload ? payload.error : null;
-        setError(typeof runtimeError === "object" && runtimeError !== null && "message" in runtimeError && typeof runtimeError.message === "string" ? runtimeError.message : "Runtime 事件不符合契约");
-        return;
-      }
-      lastSequenceRef.current = Math.max(lastSequenceRef.current, parsed.data.sequence);
-      onEventRef.current(parsed.data);
-    });
-    socket.addEventListener("error", () => { setStatus("error"); setError("无法连接 Harness Runtime"); });
-    socket.addEventListener("close", () => setStatus("closed"));
-    return () => { socketRef.current = null; socket.close(); };
+    let disposed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    const connect = () => {
+      if (disposed) return;
+      const socket = new WebSocket(runtimeUrl());
+      socketRef.current = socket;
+      setStatus("connecting");
+      socket.addEventListener("open", () => {
+        setError(null); setStatus("open");
+        socket.send(JSON.stringify({ apiVersion: API_VERSION, commandId: commandId(), type: "runtime.subscribe", afterSequence: lastSequenceRef.current }));
+      });
+      socket.addEventListener("message", (message) => {
+        let payload: unknown;
+        try { payload = JSON.parse(String(message.data)) as unknown; } catch { setError("Runtime 返回了无效 JSON"); return; }
+        const parsed = serverEventSchema.safeParse(payload);
+        if (!parsed.success) {
+          const runtimeError = typeof payload === "object" && payload !== null && "error" in payload ? payload.error : null;
+          setError(typeof runtimeError === "object" && runtimeError !== null && "message" in runtimeError && typeof runtimeError.message === "string" ? runtimeError.message : "Runtime 事件不符合契约");
+          return;
+        }
+        lastSequenceRef.current = Math.max(lastSequenceRef.current, parsed.data.sequence);
+        onEventRef.current(parsed.data);
+      });
+      socket.addEventListener("error", () => { setStatus("error"); setError("无法连接 Harness Runtime"); });
+      socket.addEventListener("close", () => {
+        if (disposed) return;
+        setStatus("closed");
+        reconnectTimer = setTimeout(connect, 1_500);
+      });
+    };
+    connect();
+    return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); socketRef.current?.close(); socketRef.current = null; };
   }, []);
 
   const send = useCallback((command: RuntimeCommand) => {

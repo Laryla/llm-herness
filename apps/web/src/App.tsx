@@ -1,9 +1,12 @@
 /* eslint-disable no-irregular-whitespace -- 全角空格用于静态原型中的图标与中文标签间距。 */
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { SettingsDialog } from "./components/settings-dialog.js";
 import { ConversationHistory } from "./domains/conversations/components/conversation-history.js";
+import type { ToolConfirmation } from "./domains/conversations/components/conversation-history.js";
+import { TracePanel } from "./domains/conversations/components/trace-panel.js";
 import { useConversations } from "./domains/conversations/model/use-conversations.js";
+import { useTrace } from "./domains/conversations/model/use-trace.js";
 import { useModels } from "./domains/models/model/use-models.js";
 import { getCurrentToolSelection } from "./domains/runtime/api/runtime-settings-api.js";
 import { useRuntime } from "./domains/runtime/model/use-runtime.js";
@@ -17,15 +20,40 @@ export function App() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [selectedTraceTurnId, setSelectedTraceTurnId] = useState<string | null>(null);
+  const [liveText, setLiveText] = useState<Record<string, string>>({});
+  const [confirmations, setConfirmations] = useState<ToolConfirmation[]>([]);
+  const activeConversationIdRef = useRef<string | null>(null);
   const workspaces = useWorkspaces();
   const conversations = useConversations(workspaces.currentWorkspaceId);
   const models = useModels();
+  const turnTrace = useTrace(conversations.selectedId, selectedTraceTurnId);
   const runtime = useRuntime((event) => {
     if (event.type === "conversation.title_changed") void conversations.reloadList();
     if (event.type === "current_model_selection.changed") void models.reload();
-    if ("conversationId" in event && event.conversationId === conversations.selectedId && (event.type === "turn.created" || event.type === "turn.status_changed")) void conversations.reloadConversation();
+    if (!("conversationId" in event) || event.conversationId !== activeConversationIdRef.current) return;
+    if (event.type === "turn.created") { setSelectedTraceTurnId(event.turn.id); void conversations.reloadConversation(); }
+    if (event.type === "step.content_delta") setLiveText((value) => ({ ...value, [event.turnId]: `${value[event.turnId] ?? ""}${event.delta}` }));
+    if (event.type === "tool.confirmation_requested") setConfirmations((items) => [...items.filter(({ stepId }) => stepId !== event.stepId), event]);
+    if (event.type === "step.status_changed" && event.status !== "awaiting_confirmation") setConfirmations((items) => items.filter(({ stepId }) => stepId !== event.stepId));
+    if (event.type === "turn.status_changed") {
+      void conversations.reloadConversation();
+      if (["completed", "failed", "cancelled", "interrupted", "limit_reached"].includes(event.status)) {
+        setLiveText((value) => { const next = { ...value }; delete next[event.turnId]; return next; });
+        setConfirmations((items) => items.filter(({ turnId }) => turnId !== event.turnId));
+      }
+    }
+    if ("turnId" in event && event.turnId === selectedTraceTurnId && event.type !== "step.content_delta") void turnTrace.reload();
   });
   const { theme, toggleTheme } = useTheme();
+  const activeTurn = useMemo(() => [...conversations.turns].reverse().find(({ status }) => ["queued", "running", "awaiting_confirmation"].includes(status)) ?? null, [conversations.turns]);
+
+  useEffect(() => {
+    const latest = conversations.turns.at(-1)?.id ?? null;
+    if (!selectedTraceTurnId || !conversations.turns.some(({ id }) => id === selectedTraceTurnId)) setSelectedTraceTurnId(latest);
+  }, [conversations.turns, selectedTraceTurnId]);
+
+  useEffect(() => { activeConversationIdRef.current = conversations.selectedId; }, [conversations.selectedId]);
 
   async function sendMessage() {
     const content = draft.trim();
@@ -35,6 +63,7 @@ export function App() {
       const tools = await getCurrentToolSelection();
       if (!models.currentSelection) throw new Error("请先在设置中选择模型");
       const conversation = await conversations.ensureConversation(content);
+      activeConversationIdRef.current = conversation.id;
       runtime.send({ type: "turn.create", conversationId: conversation.id, content, modelSelection: models.currentSelection, toolSelection: tools.selection, modelParameters: {} });
       setDraft("");
       await conversations.reloadList();
@@ -43,6 +72,14 @@ export function App() {
     } finally {
       setSending(false);
     }
+  }
+
+  function confirmTool(confirmation: ToolConfirmation, accept: boolean) {
+    runtime.send({ type: accept ? "tool.confirm" : "tool.reject", conversationId: confirmation.conversationId, turnId: confirmation.turnId, stepId: confirmation.stepId, toolCallId: confirmation.toolCallId });
+  }
+
+  function cancelTurn() {
+    if (activeTurn && conversations.selectedId) runtime.send({ type: "turn.cancel", conversationId: conversations.selectedId, turnId: activeTurn.id });
   }
   return <div className={`shell ${trace ? "show-trace" : ""} ${theme === "light" ? "light-theme" : ""}`}>
     <aside className="sidebar">
@@ -54,10 +91,10 @@ export function App() {
     </aside>
     <main>
       <header className="top"><div><strong>{conversations.selectedConversation?.title ?? "新对话"}</strong><small>{conversations.selectedConversation ? "● 已保存" : workspaces.currentWorkspace ? `保存到 ${workspaces.currentWorkspace.name}` : "请先选择工作空间"}</small></div><div><button className="trace-btn" onClick={() => setTrace(!trace)}>ϟ　运行详情</button></div></header>
-      <section className="messages">{conversations.error ? <div className="conversation-state error"><strong>无法读取对话</strong><span>{conversations.error}</span><button onClick={() => void conversations.reloadConversation()}>重试</button></div> : <ConversationHistory loading={conversations.loadingConversation} messages={conversations.messages} turns={conversations.turns} />}</section>
-      <footer className="compose-area">{(sendError || runtime.error || models.error) && <div className="compose-error">{sendError ?? runtime.error ?? models.error}</div>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}><div className="composer-state"><span><i className={runtime.status} />Runtime {runtime.status === "open" ? "已连接" : "连接中"}</span></div><textarea aria-label="消息内容" disabled={!workspaces.currentWorkspaceId || sending} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={workspaces.currentWorkspaceId ? "输入新消息…" : "请先选择工作空间"} value={draft} /><div className="composer-toolbar"><div><button className="round-action" aria-label="添加上下文" type="button">＋</button><div className="model-picker"><button className="input-model" onClick={() => setModelMenuOpen((open) => !open)} type="button"><b>AI</b><span><small>下个 Turn</small>{models.currentSelection?.modelName ?? "选择模型"}</span><i>⌄</i></button>{modelMenuOpen && <div className="model-menu">{models.profiles.flatMap((profile) => profile.id === models.selectedProfileId ? (models.catalog?.entries ?? []).map((entry) => <button className={models.currentSelection?.profileId === entry.profileId && models.currentSelection.modelName === entry.modelName ? "active" : ""} key={entry.id} onClick={() => { void models.selectModel({ profileId: entry.profileId, modelName: entry.modelName }); setModelMenuOpen(false); }} type="button"><span><strong>{entry.modelName}</strong><small>{profile.displayName}</small></span><i>✓</i></button>) : [])}<button className="configure-models" onClick={() => { setSettingsOpen(true); setModelMenuOpen(false); }} type="button">管理模型服务</button></div>}</div></div><div className="send-mode"><span><strong>{sending ? "正在发送" : "创建新 Turn"}</strong><small>Shift Enter 换行</small></span><button className="send" aria-label="发送消息" disabled={!draft.trim() || sending || runtime.status !== "open" || !models.currentSelection} type="submit">↑</button></div></div></form><small className="composer-disclaimer">Enter 发送 · Shift Enter 换行</small></footer>
+      <section className="messages">{conversations.error ? <div className="conversation-state error"><strong>无法读取对话</strong><span>{conversations.error}</span><button onClick={() => void conversations.reloadConversation()}>重试</button></div> : <ConversationHistory confirmations={confirmations} liveText={liveText} loading={conversations.loadingConversation} messages={conversations.messages} onConfirmTool={confirmTool} onSelectTrace={(turnId) => { setSelectedTraceTurnId(turnId); setTrace(true); }} selectedTraceTurnId={selectedTraceTurnId} turns={conversations.turns} />}</section>
+      <footer className="compose-area">{(sendError || runtime.error || models.error) && <div className="compose-error">{sendError ?? runtime.error ?? models.error}</div>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}><div className="composer-state"><span><i className={activeTurn ? "running" : runtime.status} />{activeTurn ? `Turn ${activeTurn.status}` : `Runtime ${runtime.status === "open" ? "已连接" : "连接中"}`}</span>{activeTurn && <button onClick={cancelTurn} type="button">■ 停止运行</button>}</div><textarea aria-label="消息内容" disabled={!workspaces.currentWorkspaceId || sending} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={workspaces.currentWorkspaceId ? "输入新消息…" : "请先选择工作空间"} value={draft} /><div className="composer-toolbar"><div><button className="round-action" aria-label="添加上下文" type="button">＋</button><div className="model-picker"><button className="input-model" onClick={() => setModelMenuOpen((open) => !open)} type="button"><b>AI</b><span><small>下个 Turn</small>{models.currentSelection?.modelName ?? "选择模型"}</span><i>⌄</i></button>{modelMenuOpen && <div className="model-menu">{models.profiles.flatMap((profile) => profile.id === models.selectedProfileId ? (models.catalog?.entries ?? []).map((entry) => <button className={models.currentSelection?.profileId === entry.profileId && models.currentSelection.modelName === entry.modelName ? "active" : ""} key={entry.id} onClick={() => { void models.selectModel({ profileId: entry.profileId, modelName: entry.modelName }); setModelMenuOpen(false); }} type="button"><span><strong>{entry.modelName}</strong><small>{profile.displayName}</small></span><i>✓</i></button>) : [])}<button className="configure-models" onClick={() => { setSettingsOpen(true); setModelMenuOpen(false); }} type="button">管理模型服务</button></div>}</div></div><div className="send-mode"><span><strong>{activeTurn ? "Turn 运行中" : sending ? "正在发送" : "创建新 Turn"}</strong><small>{activeTurn ? "可停止后继续发送" : "Shift Enter 换行"}</small></span><button className="send" aria-label="发送消息" disabled={!draft.trim() || sending || Boolean(activeTurn) || runtime.status !== "open" || !models.currentSelection} type="submit">↑</button></div></div></form><small className="composer-disclaimer">Enter 发送 · Shift Enter 换行</small></footer>
     </main>
-    <aside className="trace"><header><div><strong>Turn 2</strong><small>turn_01J5…A82F</small></div><button onClick={() => setTrace(false)}>×</button></header><section className="summary"><b>●　等待工具确认</b><small>已用时 6.7 秒</small><div><span><small>模型快照</small>gpt-4.1</span><span><small>绑定工具</small>2 个</span><span><small>循环上限</small>50</span></div></section><section className="turn-input"><small>用户输入</small><p>可以，帮我把 Tool Registry 的说明写到 docs/tool-registry.md。</p></section><section className="steps"><small>Step 轨迹</small><div className="current-step"><b className="pulse">●</b><span><strong>Step 1 · 模型调用</strong><i>运行中</i><p>模型返回 1 个 Tool Call</p><small>1,248 输入 · 126 输出 tokens</small><div className="trace-tool"><b>⌘</b><span><strong>write_text_file</strong><small>call_8f21 · 等待确认</small></span></div></span></div><div className="future-step"><b>2</b><span><strong>Step 2</strong><i>尚未开始</i><p>确认并执行工具后，结果会进入下一次模型调用。</p></span></div></section><footer><button>打开完整 JSON Trace　→</button></footer></aside>
+    <TracePanel error={turnTrace.error} loading={turnTrace.loading} onClose={() => setTrace(false)} trace={turnTrace.trace} />
     {settingsOpen && <SettingsDialog models={models} onClose={() => setSettingsOpen(false)} workspaces={workspaces} />}
   </div>;
 }

@@ -3,7 +3,7 @@
 import { API_VERSION } from "@llm-harness/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createConversation, listConversations, listMessages, listTurns } from "../src/domains/conversations/api/conversation-api.js";
+import { createConversation, getTurnTrace, listConversations, listMessages, listTurns } from "../src/domains/conversations/api/conversation-api.js";
 
 describe("Conversation API", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -29,5 +29,14 @@ describe("Conversation API", () => {
     await createConversation({ workspaceId: conversation.workspaceId, firstMessage: "你好", instructions: "" });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/conversations", expect.objectContaining({ method: "POST", body: JSON.stringify({ workspaceId: conversation.workspaceId, firstMessage: "你好", instructions: "" }) }));
+  });
+
+  it("读取指定 Turn 的真实 Trace", async () => {
+    const turn = { id: "turn_test", conversationId: "conversation_test", workspaceId: "workspace_test", status: "completed", userMessage: "你好", modelSelection: { profileId: "profile_test", modelName: "gpt-4.1" }, modelParameters: {}, toolBinding: { tools: [] }, instructions: "", maxIterations: 8, createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:01.000Z", completedAt: "2026-08-20T00:00:01.000Z" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ apiVersion: API_VERSION, data: { turn, iterations: [], steps: [], steeringMessages: [] } })));
+
+    await getTurnTrace(turn.conversationId, turn.id);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/conversations/conversation_test/turns/turn_test/trace", expect.any(Object));
   });
 });
