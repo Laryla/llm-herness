@@ -73,10 +73,21 @@ export function useModels() {
   }, [selectedProfileId]);
   const addModel = useCallback(async (modelName: string) => {
     if (!selectedProfileId) return null;
-    const entry = await mutate(() => addManualModel(selectedProfileId, modelName));
-    if (entry) setCatalog((value) => value ? { ...value, entries: [...value.entries, entry] } : value);
-    return entry;
-  }, [selectedProfileId]);
+    const result = await mutate(async () => {
+      const entry = await addManualModel(selectedProfileId, modelName);
+      const current = currentSelection
+        ? null
+        : await setCurrentModelSelection({
+            profileId: entry.profileId,
+            modelName: entry.modelName,
+          });
+      return { current, entry };
+    });
+    if (!result) return null;
+    setCatalog((value) => value ? { ...value, entries: [...value.entries, result.entry] } : value);
+    if (result.current) setCurrentSelectionState(result.current.selection);
+    return result.entry;
+  }, [currentSelection, selectedProfileId]);
   const selectModel = useCallback(async (selection: ModelSelection) => {
     const current = await mutate(() => setCurrentModelSelection(selection));
     if (current) setCurrentSelectionState(current.selection);
