@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { ServerEvent, Turn } from "@llm-harness/contracts";
+import type { Message, ServerEvent, Turn } from "@llm-harness/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConversationHistory } from "../src/domains/conversations/components/conversation-history.js";
@@ -17,5 +17,15 @@ describe("Conversation History", () => {
     expect(screen.getByText(/正在处理/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "确认执行" }));
     expect(onConfirmTool).toHaveBeenCalledWith(confirmation, true);
+  });
+
+  it("把历史消息和流式内容按 GFM 与换行规则渲染", () => {
+    const assistantMessage: Message = { id: "message_test", conversationId: turn.conversationId, turnId: turn.id, stepId: "step_done", sequence: 1, role: "assistant", content: "## 已完成\n第一行\n第二行\n\n- 项目 A\n- 项目 B", createdAt: "2026-08-20T00:00:01.000Z" };
+    const view = render(<ConversationHistory confirmations={[]} liveText={{ [turn.id]: "**生成中**\n下一行" }} loading={false} messages={[assistantMessage]} onConfirmTool={vi.fn()} onSelectTrace={vi.fn()} selectedTraceTurnId={turn.id} turns={[turn]} />);
+
+    expect(screen.getByRole("heading", { level: 2, name: "已完成" })).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByText("生成中").tagName).toBe("STRONG");
+    expect(view.container.querySelectorAll("br").length).toBeGreaterThanOrEqual(2);
   });
 });
