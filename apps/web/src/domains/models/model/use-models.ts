@@ -28,9 +28,20 @@ export function useModels() {
 
   const reloadCatalog = useCallback(async () => {
     if (!selectedProfileId) { setCatalog(null); return; }
-    try { setCatalog(await getModelCatalog(selectedProfileId)); }
+    try {
+      const next = await getModelCatalog(selectedProfileId);
+      setCatalog(next);
+      // 单用户模式下，第一个已配置模型应立即成为下个 Turn 的模型，避免额外选择一步。
+      if (!currentSelection && next.entries[0]) {
+        const current = await setCurrentModelSelection({
+          profileId: next.entries[0].profileId,
+          modelName: next.entries[0].modelName,
+        });
+        setCurrentSelectionState(current.selection);
+      }
+    }
     catch (requestError) { setError(message(requestError)); }
-  }, [selectedProfileId]);
+  }, [currentSelection, selectedProfileId]);
   useEffect(() => { void reloadCatalog(); }, [reloadCatalog]);
 
   async function mutate<T>(operation: () => Promise<T>): Promise<T | null> {

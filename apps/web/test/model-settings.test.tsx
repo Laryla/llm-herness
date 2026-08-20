@@ -43,6 +43,22 @@ describe("模型连接测试", () => {
     expect(testConnection).toHaveBeenCalledWith(failedProfile.id, "model-a");
   });
 
+  it("测试成功后展示明确反馈", async () => {
+    const succeededProfile: ModelProfile = {
+      ...failedProfile,
+      connection: {
+        status: "succeeded",
+        testedAt: "2026-08-20T00:00:00.000Z",
+        latencyMs: 18,
+      },
+    };
+    render(<ModelSettings state={modelState(vi.fn().mockResolvedValue(succeededProfile))} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
+
+    expect(await screen.findByText("连接成功，已使用 model-a 完成测试")).toBeTruthy();
+  });
+
   it("预填已有配置并在密钥留空时保留原密钥", async () => {
     const state = modelState();
     render(<ModelSettings state={state} />);
