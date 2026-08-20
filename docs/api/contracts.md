@@ -19,7 +19,7 @@ import {
 
 - `common`：协议版本、实体 ID、ISO 时间与错误 Envelope。
 - `workspace`：Workspace 与 Current Workspace。
-- `model`：Model Profile、Model Catalog、Model Selection 和模型参数。
+- `model`：单层 Model Profile、Model Selection 和模型参数；每条 Profile 直接包含供应商模型名称与连接配置。
 - `tool`：Tool、Tool Policy、Tool Selection 与 Turn 级 Tool Binding 快照。
 - `conversation`：Conversation、Turn、Iteration、Step 与状态。
 - `message`：对话消息、Queued Message、Steering Message 与 Trace。

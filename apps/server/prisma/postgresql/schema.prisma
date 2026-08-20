@@ -34,6 +34,7 @@ model Workspace {
 model ModelProfile {
   id                String              @id
   displayName       String
+  modelName         String
   baseUrl           String
   secretSource      String
   secretReference   String

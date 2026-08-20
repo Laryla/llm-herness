@@ -56,6 +56,8 @@ async function createMigratedDatabase() {
   for (const migrationName of [
     "20260819000100_init",
     "20260819000200_model_catalog_refresh",
+    "20260819000300_tool_confirmation_calls",
+    "20260820000100_unify_model_profile",
   ]) {
     sqlite.exec(
       await readFile(
@@ -149,19 +151,12 @@ describe("Agent Runtime Gateway", () => {
       data: {
         id: "profile_runtime",
         displayName: "测试模型",
+        modelName: "model-a",
         baseUrl: `${upstreamAddress}/v1`,
         secretSource: "keychain",
         secretReference: "profile_runtime",
         maskedSecret: "****",
         connectionStatus: "succeeded",
-      },
-    });
-    await database.client.modelCatalogEntry.create({
-      data: {
-        id: "catalog_runtime",
-        profileId: "profile_runtime",
-        modelName: "model-a",
-        source: "manual",
       },
     });
     const secrets = new MemorySecretStore();

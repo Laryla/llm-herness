@@ -34,6 +34,8 @@ async function createTestContext() {
   for (const migrationName of [
     "20260819000100_init",
     "20260819000200_model_catalog_refresh",
+    "20260819000300_tool_confirmation_calls",
+    "20260820000100_unify_model_profile",
   ]) {
     sqlite.exec(
       await readFile(

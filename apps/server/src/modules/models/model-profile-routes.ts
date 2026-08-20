@@ -1,9 +1,7 @@
 import {
   API_VERSION,
-  createManualModelRequestSchema,
   createModelProfileRequestSchema,
   setCurrentModelSelectionRequestSchema,
-  testModelConnectionRequestSchema,
   updateModelProfileRequestSchema,
 } from "@llm-harness/contracts";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -123,86 +121,11 @@ export function registerModelProfileRoutes(
   app.post<{ Params: { profileId: string } }>(
     "/api/v1/model-profiles/:profileId/test-connection",
     async (request, reply) => {
-      const parsed = testModelConnectionRequestSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return invalidRequest(reply, "模型连接测试参数无效", parsed.error.issues);
-      }
       try {
         return {
           apiVersion: API_VERSION,
-          data: await service.testConnection(
-            request.params.profileId,
-            parsed.data.modelName,
-          ),
+          data: await service.testConnection(request.params.profileId),
         };
-      } catch (error) {
-        return sendError(reply, error);
-      }
-    },
-  );
-
-  // 读取该 Profile 当前的自动发现与手动模型条目。
-  app.get<{ Params: { profileId: string } }>(
-    "/api/v1/model-profiles/:profileId/models",
-    async (request, reply) => {
-      try {
-        return {
-          apiVersion: API_VERSION,
-          data: await service.getCatalog(request.params.profileId),
-        };
-      } catch (error) {
-        return sendError(reply, error);
-      }
-    },
-  );
-
-  // 从上游 `/models` 刷新自动发现条目，手动条目保持不变。
-  app.post<{ Params: { profileId: string } }>(
-    "/api/v1/model-profiles/:profileId/models/refresh",
-    async (request, reply) => {
-      try {
-        return {
-          apiVersion: API_VERSION,
-          data: await service.refreshCatalog(request.params.profileId),
-        };
-      } catch (error) {
-        return sendError(reply, error);
-      }
-    },
-  );
-
-  // 为不支持模型发现或未返回完整列表的服务添加手动模型。
-  app.post<{ Params: { profileId: string } }>(
-    "/api/v1/model-profiles/:profileId/models",
-    async (request, reply) => {
-      const parsed = createManualModelRequestSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return invalidRequest(reply, "手动模型请求参数无效", parsed.error.issues);
-      }
-      try {
-        return reply.code(201).send({
-          apiVersion: API_VERSION,
-          data: await service.addManualModel(
-            request.params.profileId,
-            parsed.data.modelName,
-          ),
-        });
-      } catch (error) {
-        return sendError(reply, error);
-      }
-    },
-  );
-
-  // 删除指定手动模型；自动发现条目只能通过刷新更新。
-  app.delete<{ Params: { profileId: string; entryId: string } }>(
-    "/api/v1/model-profiles/:profileId/models/:entryId",
-    async (request, reply) => {
-      try {
-        await service.removeManualModel(
-          request.params.profileId,
-          request.params.entryId,
-        );
-        return reply.code(204).send();
       } catch (error) {
         return sendError(reply, error);
       }
@@ -215,7 +138,7 @@ export function registerModelProfileRoutes(
     data: await service.getCurrentSelection(),
   }));
 
-  // 切换或清空 Current Model Selection，只接受 Catalog 中已有模型。
+  // 切换或清空 Current Model Selection，只接受与 Profile 匹配的模型名称。
   app.put("/api/v1/current-model-selection", async (request, reply) => {
     const parsed = setCurrentModelSelectionRequestSchema.safeParse(request.body);
     if (!parsed.success) {

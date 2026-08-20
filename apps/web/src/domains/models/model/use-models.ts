@@ -1,15 +1,15 @@
-import type { CreateModelProfileRequest, ModelCatalog, ModelProfile, ModelSelection, UpdateModelProfileRequest } from "@llm-harness/contracts";
+import type { CreateModelProfileRequest, ModelProfile, ModelSelection, UpdateModelProfileRequest } from "@llm-harness/contracts";
 import { useCallback, useEffect, useState } from "react";
 
-import { addManualModel, createModelProfile, getCurrentModelSelection, getModelCatalog, listModelProfiles, refreshModelCatalog, setCurrentModelSelection, testModelProfile, updateModelProfile } from "../api/model-api.js";
+import { createModelProfile, getCurrentModelSelection, listModelProfiles, setCurrentModelSelection, testModelProfile, updateModelProfile } from "../api/model-api.js";
 
 function message(error: unknown) { return error instanceof Error ? error.message : "模型配置请求失败"; }
+function selectionOf(profile: ModelProfile): ModelSelection { return { profileId: profile.id, modelName: profile.modelName }; }
 
-/** 统一管理设置页和输入框共享的 Profile、Catalog 与当前模型选择。 */
+/** 单层模型配置状态：一条 Profile 同时包含连接信息和供应商模型名称。 */
 export function useModels() {
   const [profiles, setProfiles] = useState<ModelProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [currentSelection, setCurrentSelectionState] = useState<ModelSelection | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -19,30 +19,14 @@ export function useModels() {
     setLoading(true); setError(null);
     try {
       const [items, current] = await Promise.all([listModelProfiles(), getCurrentModelSelection()]);
-      setProfiles(items); setCurrentSelectionState(current.selection);
-      setSelectedProfileId((id) => id && items.some((profile) => profile.id === id) ? id : (current.selection?.profileId ?? items[0]?.id ?? null));
+      let selection = current.selection;
+      if (!selection && items[0]) selection = (await setCurrentModelSelection(selectionOf(items[0]))).selection;
+      setProfiles(items); setCurrentSelectionState(selection);
+      setSelectedProfileId((id) => id && items.some((profile) => profile.id === id) ? id : (selection?.profileId ?? items[0]?.id ?? null));
     } catch (requestError) { setError(message(requestError)); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void reload(); }, [reload]);
-
-  const reloadCatalog = useCallback(async () => {
-    if (!selectedProfileId) { setCatalog(null); return; }
-    try {
-      const next = await getModelCatalog(selectedProfileId);
-      setCatalog(next);
-      // 单用户模式下，第一个已配置模型应立即成为下个 Turn 的模型，避免额外选择一步。
-      if (!currentSelection && next.entries[0]) {
-        const current = await setCurrentModelSelection({
-          profileId: next.entries[0].profileId,
-          modelName: next.entries[0].modelName,
-        });
-        setCurrentSelectionState(current.selection);
-      }
-    }
-    catch (requestError) { setError(message(requestError)); }
-  }, [currentSelection, selectedProfileId]);
-  useEffect(() => { void reloadCatalog(); }, [reloadCatalog]);
 
   async function mutate<T>(operation: () => Promise<T>): Promise<T | null> {
     setSaving(true); setError(null);
@@ -52,47 +36,34 @@ export function useModels() {
   }
 
   const createProfile = useCallback(async (input: CreateModelProfileRequest) => {
-    const created = await mutate(() => createModelProfile(input));
-    if (created) { setProfiles((items) => [...items, created]); setSelectedProfileId(created.id); }
-    return created;
+    const result = await mutate(async () => {
+      const profile = await createModelProfile(input);
+      const current = await setCurrentModelSelection(selectionOf(profile));
+      return { current, profile };
+    });
+    if (!result) return null;
+    setProfiles((items) => [...items, result.profile]); setSelectedProfileId(result.profile.id); setCurrentSelectionState(result.current.selection);
+    return result.profile;
   }, []);
-  const testConnection = useCallback(async (profileId: string, modelName: string) => {
-    const updated = await mutate(() => testModelProfile(profileId, modelName));
+  const testConnection = useCallback(async (profileId: string) => {
+    const updated = await mutate(() => testModelProfile(profileId));
     if (updated) setProfiles((items) => items.map((profile) => profile.id === updated.id ? updated : profile));
     return updated;
   }, []);
   const updateProfile = useCallback(async (profileId: string, input: UpdateModelProfileRequest) => {
     const updated = await mutate(() => updateModelProfile(profileId, input));
-    if (updated) setProfiles((items) => items.map((profile) => profile.id === updated.id ? updated : profile));
+    if (!updated) return null;
+    setProfiles((items) => items.map((profile) => profile.id === updated.id ? updated : profile));
+    if (currentSelection?.profileId === updated.id) {
+      const current = await setCurrentModelSelection(selectionOf(updated)); setCurrentSelectionState(current.selection);
+    }
     return updated;
-  }, []);
-  const refreshCatalog = useCallback(async () => {
-    if (!selectedProfileId) return;
-    const next = await mutate(() => refreshModelCatalog(selectedProfileId));
-    if (next) setCatalog(next);
-  }, [selectedProfileId]);
-  const addModel = useCallback(async (modelName: string) => {
-    if (!selectedProfileId) return null;
-    const result = await mutate(async () => {
-      const entry = await addManualModel(selectedProfileId, modelName);
-      const current = currentSelection
-        ? null
-        : await setCurrentModelSelection({
-            profileId: entry.profileId,
-            modelName: entry.modelName,
-          });
-      return { current, entry };
-    });
-    if (!result) return null;
-    setCatalog((value) => value ? { ...value, entries: [...value.entries, result.entry] } : value);
-    if (result.current) setCurrentSelectionState(result.current.selection);
-    return result.entry;
-  }, [currentSelection, selectedProfileId]);
+  }, [currentSelection]);
   const selectModel = useCallback(async (selection: ModelSelection) => {
     const current = await mutate(() => setCurrentModelSelection(selection));
     if (current) setCurrentSelectionState(current.selection);
     return current !== null;
   }, []);
 
-  return { addModel, catalog, createProfile, currentSelection, error, loading, profiles, refreshCatalog, reload, saving, selectModel, selectedProfileId, setSelectedProfileId, testConnection, updateProfile };
+  return { createProfile, currentSelection, error, loading, profiles, reload, saving, selectModel, selectedProfileId, setSelectedProfileId, testConnection, updateProfile };
 }

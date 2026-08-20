@@ -324,25 +324,21 @@ export class AgentRuntimeGateway implements RuntimeGateway {
   }
 
   private async resolveModel(command: TurnCreateCommand) {
-    const entry = await this.client.modelCatalogEntry.findFirst({
-      where: {
-        profileId: command.modelSelection.profileId,
-        modelName: command.modelSelection.modelName,
-      },
-      include: { profile: true },
+    const profile = await this.client.modelProfile.findUnique({
+      where: { id: command.modelSelection.profileId },
     });
-    if (!entry) {
-      throw new RuntimeGatewayError("model_not_found", "选择的模型不在 Model Catalog 中");
+    if (!profile || profile.modelName !== command.modelSelection.modelName) {
+      throw new RuntimeGatewayError("model_not_found", "选择的模型配置不存在或已经变更");
     }
-    const source = entry.profile.secretSource as "local" | "keychain" | "environment";
-    const apiKey = await this.stores[source].get(entry.profile.secretReference);
+    const source = profile.secretSource as "local" | "keychain" | "environment";
+    const apiKey = await this.stores[source].get(profile.secretReference);
     if (apiKey === null) {
       throw new RuntimeGatewayError("secret_not_found", "找不到模型密钥");
     }
     return {
       apiKey,
-      baseUrl: entry.profile.baseUrl,
-      modelId: entry.modelName,
+      baseUrl: profile.baseUrl,
+      modelId: profile.modelName,
     };
   }
 

@@ -31,6 +31,7 @@ describe("领域资源契约", () => {
     const profile = {
       id: "profile_01JABCDEF0123456789",
       displayName: "Local Model",
+      modelName: "local-model",
       baseUrl: "http://127.0.0.1:11434/v1",
       secret: {
         source: "keychain",
@@ -54,6 +55,7 @@ describe("领域资源契约", () => {
   it("创建 Model Profile 必须且只能选择一种密钥来源", () => {
     const base = {
       displayName: "Local Model",
+      modelName: "local-model",
       baseUrl: "http://127.0.0.1:11434/v1",
     };
     expect(

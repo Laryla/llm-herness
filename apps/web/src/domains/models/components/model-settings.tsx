@@ -1,72 +1,54 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { CheckCircle2, Clock3, LoaderCircle, Pencil, Plus, RefreshCw, Server, XCircle } from "lucide-react";
+import { CheckCircle2, Clock3, LoaderCircle, Pencil, Plus, Server, XCircle } from "lucide-react";
 
 import type { useModels } from "../model/use-models.js";
 
 type ModelState = ReturnType<typeof useModels>;
 
-/** Model Profile 配置页；密钥输入在提交成功后立即随组件状态清空。 */
+/** 单层模型配置页：连接、模型名称、测试与选择都归属于同一条配置。 */
 export function ModelSettings({ state }: { state: ModelState }) {
   const [formOpen, setFormOpen] = useState(state.profiles.length === 0);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
+  const [modelName, setModelName] = useState("");
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
   const [secretValue, setSecretValue] = useState("");
   const [secretMode, setSecretMode] = useState<"local" | "environment">("local");
-  const [manualModel, setManualModel] = useState("");
   const [testingProfileId, setTestingProfileId] = useState<string | null>(null);
-  const [connectionNotice, setConnectionNotice] = useState<{ status: "succeeded" | "failed"; message: string } | null>(null);
-  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ status: "succeeded" | "failed"; message: string } | null>(null);
 
-  async function submitProfile(event: FormEvent<HTMLFormElement>) {
+  function closeForm() {
+    setFormOpen(false); setEditingProfileId(null); setDisplayName(""); setModelName(""); setBaseUrl("https://api.openai.com/v1"); setSecretMode("local"); setSecretValue("");
+  }
+  function openEdit(profile: ModelState["profiles"][number]) {
+    setEditingProfileId(profile.id); setDisplayName(profile.displayName); setModelName(profile.modelName); setBaseUrl(profile.baseUrl); setSecretMode(profile.secret.source === "environment" ? "environment" : "local"); setSecretValue(""); setFormOpen(true);
+  }
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const secret = secretValue.length === 0 ? {} : secretMode === "local" ? { secretValue } : { secretEnvironmentVariable: secretValue };
     const saved = editingProfileId
-      ? await state.updateProfile(editingProfileId, { displayName, baseUrl, ...secret })
-      : await state.createProfile(secretMode === "local" ? { displayName, baseUrl, secretValue } : { displayName, baseUrl, secretEnvironmentVariable: secretValue });
-    if (!saved) return;
-    closeForm();
+      ? await state.updateProfile(editingProfileId, { displayName, modelName, baseUrl, ...secret })
+      : await state.createProfile(secretMode === "local" ? { displayName, modelName, baseUrl, secretValue } : { displayName, modelName, baseUrl, secretEnvironmentVariable: secretValue });
+    if (saved) closeForm();
   }
-
-  async function submitModel(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (await state.addModel(manualModel)) setManualModel("");
-  }
-
-  async function testConnection(profileId: string, modelName: string) {
-    setTestingProfileId(profileId); setConnectionNotice(null);
+  async function testConnection(profileId: string) {
+    setTestingProfileId(profileId); setNotice(null);
     try {
-      const tested = await state.testConnection(profileId, modelName);
-      if (tested?.connection.status === "succeeded") setConnectionNotice({ status: "succeeded", message: `连接成功，已使用 ${modelName} 完成测试` });
-      else if (tested?.connection.status === "failed") setConnectionNotice({ status: "failed", message: `连接失败：${tested.connection.error.message}` });
-    }
-    finally { setTestingProfileId(null); }
+      const tested = await state.testConnection(profileId);
+      if (tested?.connection.status === "succeeded") setNotice({ status: "succeeded", message: `已使用 ${tested.modelName} 完成测试` });
+      else if (tested?.connection.status === "failed") setNotice({ status: "failed", message: tested.connection.error.message });
+    } finally { setTestingProfileId(null); }
   }
 
-  function closeForm() {
-    setFormOpen(false); setEditingProfileId(null); setSecretValue(""); setDisplayName(""); setBaseUrl("https://api.openai.com/v1"); setSecretMode("local");
-  }
-
-  function openCreateForm() {
-    closeForm(); setFormOpen(true);
-  }
-
-  function openEditForm(profile: ModelState["profiles"][number]) {
-    setEditingProfileId(profile.id); setDisplayName(profile.displayName); setBaseUrl(profile.baseUrl); setSecretMode(profile.secret.source === "environment" ? "environment" : "local"); setSecretValue(""); setFormOpen(true);
-  }
-
-  const selectedProfile = state.profiles.find(({ id }) => id === state.selectedProfileId);
-  const testModelName = selectedProfile && state.currentSelection?.profileId === selectedProfile.id
-    ? state.currentSelection.modelName
-    : state.catalog && state.catalog.profileId === selectedProfile?.id
-      ? state.catalog.entries[0]?.modelName
-      : undefined;
+  const selected = state.profiles.find(({ id }) => id === state.selectedProfileId);
   return <section className="settings-content model-settings">
-    <div className="settings-heading"><span><strong>模型服务</strong><small>兼容 OpenAI Chat Completions 协议的服务端点</small></span><button onClick={openCreateForm}><Plus />添加服务</button></div>
-    {formOpen && <form className="workspace-form model-profile-form" onSubmit={(event) => void submitProfile(event)}><header><strong>{editingProfileId ? "编辑模型服务" : "添加模型服务"}</strong><small>{editingProfileId ? "留空密钥字段将保留现有密钥" : "保存后可测试连接并发现模型"}</small></header><label><span>显示名称</span><input aria-label="模型服务名称" onChange={(event) => setDisplayName(event.target.value)} placeholder="OpenAI" required value={displayName} /></label><label><span>Base URL</span><input aria-label="模型服务地址" onChange={(event) => setBaseUrl(event.target.value)} required type="url" value={baseUrl} /></label><label><span>密钥来源</span><select aria-label="密钥来源" onChange={(event) => { setSecretMode(event.target.value as "local" | "environment"); setSecretValue(""); }} value={secretMode}><option value="local">本地 config.json</option><option value="environment">环境变量</option></select></label><label><span>{secretMode === "local" ? "API Key" : "环境变量名称"}</span><input aria-label="模型服务密钥" autoComplete="new-password" onChange={(event) => setSecretValue(event.target.value)} pattern={secretMode === "environment" ? "[A-Z_][A-Z0-9_]{0,127}" : undefined} placeholder={editingProfileId ? "留空以保留现有密钥" : secretMode === "local" ? "明文保存到本地 config.json" : "例如 OPENAI_API_KEY"} required={!editingProfileId} type={secretMode === "local" ? "password" : "text"} value={secretValue} /></label><small>{secretMode === "local" ? "密钥明文保存在 Harness Home/config.json，仅依赖文件权限保护。" : "Server 只保存环境变量名称，真实值必须在启动 Server 前注入。"}</small><div><button type="button" onClick={closeForm}>取消</button><button className="primary" disabled={state.saving}>{editingProfileId ? "保存修改" : "保存服务"}</button></div></form>}
+    <div className="settings-heading"><span><strong>模型配置</strong><small>一条配置直接对应一个可调用模型</small></span><button onClick={() => { closeForm(); setFormOpen(true); }}><Plus />添加模型</button></div>
+    {formOpen && <form className="workspace-form model-profile-form" onSubmit={(event) => void submit(event)}><header><strong>{editingProfileId ? "编辑模型配置" : "添加模型配置"}</strong><small>保存后即可测试并用于下一个 Turn</small></header><label><span>配置名称</span><input aria-label="模型配置名称" onChange={(event) => setDisplayName(event.target.value)} placeholder="GPT 5.6" required value={displayName} /></label><label><span>模型名称</span><input aria-label="供应商模型名称" onChange={(event) => setModelName(event.target.value)} placeholder="gpt-5.6" required value={modelName} /></label><label><span>Base URL</span><input aria-label="模型服务地址" onChange={(event) => setBaseUrl(event.target.value)} required type="url" value={baseUrl} /></label><label><span>密钥来源</span><select aria-label="密钥来源" onChange={(event) => { setSecretMode(event.target.value as "local" | "environment"); setSecretValue(""); }} value={secretMode}><option value="local">本地 config.json</option><option value="environment">环境变量</option></select></label><label><span>{secretMode === "local" ? "API Key" : "环境变量名称"}</span><input aria-label="模型服务密钥" autoComplete="new-password" onChange={(event) => setSecretValue(event.target.value)} placeholder={editingProfileId ? "留空以保留现有密钥" : "输入密钥"} required={!editingProfileId} type={secretMode === "local" ? "password" : "text"} value={secretValue} /></label><div><button type="button" onClick={closeForm}>取消</button><button className="primary" disabled={state.saving}>{editingProfileId ? "保存修改" : "保存模型"}</button></div></form>}
     {state.error && <div className="workspace-error"><span>{state.error}</span><button onClick={() => void state.reload()}>重试</button></div>}
-    <div className="model-layout"><div className="profile-list">{state.loading && <p>正在读取模型服务…</p>}{state.profiles.map((profile) => <button className={profile.id === state.selectedProfileId ? "active" : ""} key={profile.id} onClick={() => state.setSelectedProfileId(profile.id)}><Server /><span><strong>{profile.displayName}</strong><small>{profile.baseUrl}</small></span><i className={profile.connection.status}>{profile.connection.status === "succeeded" ? "已连接" : profile.connection.status === "failed" ? "失败" : "未测试"}</i></button>)}</div>
-      {selectedProfile && <div className="model-catalog"><header><span><strong>{selectedProfile.displayName}</strong><small>{selectedProfile.secret.maskedValue}</small></span><div><button aria-label="编辑模型服务" onClick={() => openEditForm(selectedProfile)}><Pencil /></button></div></header><div className={`connection-test ${testModelName ? "" : "missing-model"}`}><small>{testModelName ? <>使用 <strong>{testModelName}</strong> 测试</> : "尚未配置模型，请先在下方填写模型名称并点击“添加”"}</small><button disabled={state.saving || testingProfileId !== null || !testModelName} title={testModelName ? `使用 ${testModelName} 测试连接` : "请先添加模型"} onClick={() => testModelName && void testConnection(selectedProfile.id, testModelName)}>{testingProfileId === selectedProfile.id ? <><LoaderCircle className="spin" />正在测试</> : "测试连接"}</button></div>{connectionNotice && <div aria-live="assertive" className={`connection-toast ${connectionNotice.status}`} role="status"><strong>{connectionNotice.status === "succeeded" ? "连接测试成功" : "连接测试失败"}</strong><span>{connectionNotice.message}</span><button aria-label="关闭连接测试提示" onClick={() => setConnectionNotice(null)}>×</button></div>}<ConnectionResult connection={selectedProfile.connection} /><div className="catalog-heading"><span>可用模型（可选发现）</span><button aria-label="刷新模型列表" disabled={state.saving} onClick={() => void state.refreshCatalog()}><RefreshCw /></button></div><div className="catalog-list">{state.catalog?.entries.map((entry) => { const current = state.currentSelection?.profileId === entry.profileId && state.currentSelection.modelName === entry.modelName; return <button className={current ? "active" : ""} key={entry.id} onClick={() => void state.selectModel({ profileId: entry.profileId, modelName: entry.modelName })}><span><strong>{entry.modelName}</strong><small>{entry.source === "manual" ? "手动" : "发现"}</small></span><i>{current ? "当前模型" : "选择"}</i></button>; })}{state.catalog?.entries.length === 0 && <p>服务配置与模型名称是两项配置；这里至少需要添加一个模型。</p>}</div><form className="manual-model" onSubmit={(event) => void submitModel(event)}><input aria-label="手动模型名称" onChange={(event) => setManualModel(event.target.value)} placeholder="例如 gpt-4.1" required value={manualModel} /><button disabled={state.saving}>添加并选中</button></form></div>}
+    {notice && <div aria-live="assertive" className={`connection-toast ${notice.status}`} role="status"><strong>{notice.status === "succeeded" ? "连接测试成功" : "连接测试失败"}</strong><span>{notice.message}</span><button aria-label="关闭连接测试提示" onClick={() => setNotice(null)}>×</button></div>}
+    <div className="model-layout"><div className="profile-list">{state.loading && <p>正在读取模型配置…</p>}{state.profiles.map((profile) => <button className={profile.id === state.selectedProfileId ? "active" : ""} key={profile.id} onClick={() => state.setSelectedProfileId(profile.id)}><Server /><span><strong>{profile.displayName}</strong><small>{profile.modelName}</small></span><i className={profile.connection.status}>{profile.connection.status === "succeeded" ? "已连接" : profile.connection.status === "failed" ? "失败" : "未测试"}</i></button>)}</div>
+      {selected && <div className="model-catalog"><header><span><strong>{selected.displayName}</strong><small>{selected.modelName}</small></span><div><button aria-label="编辑模型配置" onClick={() => openEdit(selected)}><Pencil /></button><button disabled={state.saving || testingProfileId !== null} onClick={() => void testConnection(selected.id)}>{testingProfileId === selected.id ? <><LoaderCircle className="spin" />正在测试</> : "测试连接"}</button></div></header><ConnectionResult connection={selected.connection} /><div className="single-model-action"><span><small>下个 Turn 使用</small><strong>{selected.modelName}</strong></span><button disabled={state.saving || state.currentSelection?.profileId === selected.id} onClick={() => void state.selectModel({ profileId: selected.id, modelName: selected.modelName })}>{state.currentSelection?.profileId === selected.id ? "当前模型" : "设为当前"}</button></div></div>}
     </div>
   </section>;
 }

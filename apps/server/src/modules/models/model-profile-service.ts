@@ -4,15 +4,12 @@ import type {
   ContractError,
   CreateModelProfileRequest,
   CurrentModelSelection,
-  ModelCatalog,
-  ModelCatalogEntry,
   ModelConnection,
   ModelProfile,
   ModelSelection,
   SecretReference,
   UpdateModelProfileRequest,
 } from "@llm-harness/contracts";
-import { z } from "zod";
 
 import type { PersistenceClient } from "../../infrastructure/database/database.js";
 import { Prisma } from "../../infrastructure/database/generated/sqlite/client.js";
@@ -34,12 +31,6 @@ const silentLogger: ModelProfileLogger = {
   info: () => undefined,
   warn: () => undefined,
 };
-
-const modelsResponseSchema = z
-  .object({
-    data: z.array(z.object({ id: z.string().trim().min(1).max(200) }).passthrough()),
-  })
-  .passthrough();
 
 export interface ModelSecretStores {
   readonly keychain: SecretStore;
@@ -67,7 +58,7 @@ export class ModelProfileServiceError extends Error {
 
 type Fetch = typeof fetch;
 
-function createId(prefix: "profile" | "catalog"): string {
+function createId(prefix: "profile"): string {
   return `${prefix}_${randomUUID().replaceAll("-", "")}`;
 }
 
@@ -129,6 +120,7 @@ function serializeConnection(record: {
 function serializeProfile(record: {
   id: string;
   displayName: string;
+  modelName: string;
   baseUrl: string;
   secretSource: string;
   secretReference: string;
@@ -143,6 +135,7 @@ function serializeProfile(record: {
   return {
     id: record.id,
     displayName: record.displayName,
+    modelName: record.modelName,
     baseUrl: record.baseUrl,
     secret: {
       source: record.secretSource as SecretReference["source"],
@@ -150,22 +143,6 @@ function serializeProfile(record: {
       maskedValue: record.maskedSecret,
     },
     connection: serializeConnection(record),
-    createdAt: record.createdAt.toISOString(),
-    updatedAt: record.updatedAt.toISOString(),
-  };
-}
-
-function serializeCatalogEntry(record: {
-  id: string;
-  profileId: string;
-  modelName: string;
-  source: string;
-  createdAt: Date;
-  updatedAt: Date;
-}): ModelCatalogEntry {
-  return {
-    ...record,
-    source: record.source as ModelCatalogEntry["source"],
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   };
@@ -208,6 +185,7 @@ export class ModelProfileService {
         data: {
           id,
           displayName: input.displayName.trim(),
+          modelName: input.modelName.trim(),
           baseUrl: normalizeBaseUrl(input.baseUrl),
           secretSource: secret.source,
           secretReference: secret.reference,
@@ -275,6 +253,9 @@ export class ModelProfileService {
         ...(input.displayName === undefined
           ? {}
           : { displayName: input.displayName.trim() }),
+        ...(input.modelName === undefined
+          ? {}
+          : { modelName: input.modelName.trim() }),
         ...(input.baseUrl === undefined
           ? {}
           : {
@@ -288,7 +269,7 @@ export class ModelProfileService {
               maskedSecret: secret.maskedValue,
             }
           : {}),
-        ...(input.baseUrl !== undefined || secret !== undefined
+        ...(input.baseUrl !== undefined || input.modelName !== undefined || secret !== undefined
           ? {
               connectionStatus: "untested",
               connectionTestedAt: null,
@@ -340,6 +321,7 @@ export class ModelProfileService {
       {
         changedBaseUrl: input.baseUrl !== undefined,
         changedDisplayName: input.displayName !== undefined,
+        changedModelName: input.modelName !== undefined,
         changedSecret:
           input.secretValue !== undefined ||
           input.secretEnvironmentVariable !== undefined,
@@ -375,8 +357,9 @@ export class ModelProfileService {
   }
 
   /** 发送最小 Chat Completions 请求测试连接，不依赖供应商可选的模型列表接口。 */
-  async testConnection(id: string, modelName: string): Promise<ModelProfile> {
+  async testConnection(id: string): Promise<ModelProfile> {
     const profile = await this.findProfile(id);
+    const modelName = profile.modelName;
     try {
       const { latencyMs } = await this.fetchChatCompletion(profile, modelName);
       const record = await this.client.modelProfile.update({
@@ -416,159 +399,6 @@ export class ModelProfileService {
     }
   }
 
-  /** 从上游 `/models` 重新发现模型，保留手动条目并维护选择一致性。 */
-  async refreshCatalog(id: string): Promise<ModelCatalog> {
-    const profile = await this.findProfile(id);
-    try {
-      const { modelNames, latencyMs } = await this.fetchModels(profile);
-      const refreshedAt = new Date();
-      await this.client.$transaction(async (transaction) => {
-        const manualEntries = await transaction.modelCatalogEntry.findMany({
-          where: { profileId: id, source: "manual" },
-          select: { modelName: true },
-        });
-        const manualModelNames = new Set(
-          manualEntries.map(({ modelName }) => modelName),
-        );
-        await transaction.modelCatalogEntry.deleteMany({
-          where: { profileId: id, source: "discovered" },
-        });
-        const discoveredModelNames = modelNames.filter(
-          (modelName) => !manualModelNames.has(modelName),
-        );
-        if (discoveredModelNames.length > 0) {
-          await transaction.modelCatalogEntry.createMany({
-            data: discoveredModelNames.map((modelName) => ({
-              id: createId("catalog"),
-              profileId: id,
-              modelName,
-              source: "discovered",
-            })),
-          });
-        }
-        await transaction.modelProfile.update({
-          where: { id },
-          data: {
-            catalogRefreshedAt: refreshedAt,
-          },
-        });
-        const settings = await transaction.harnessSettings.findUnique({
-          where: { id: SETTINGS_ID },
-        });
-        if (
-          settings?.currentModelProfileId === id &&
-          settings.currentModelName !== null &&
-          !new Set([...manualModelNames, ...discoveredModelNames]).has(
-            settings.currentModelName,
-          )
-        ) {
-          await transaction.harnessSettings.update({
-            where: { id: SETTINGS_ID },
-            data: { currentModelProfileId: null, currentModelName: null },
-          });
-        }
-      });
-      this.logger.info(
-        {
-          discoveredModelCount: modelNames.length,
-          latencyMs,
-          modelProfileId: id,
-        },
-        "Model Catalog 刷新完成",
-      );
-      return this.getCatalog(id);
-    } catch (error) {
-      const contractError = this.toConnectionError(error);
-      this.logger.warn(
-        {
-          ...createConnectionLogContext(error, contractError, profile, "/models"),
-          modelProfileId: id,
-        },
-        "Model Catalog 刷新失败",
-      );
-      throw new ModelProfileServiceError(
-        "model_connection_failed",
-        contractError.message,
-        { error: contractError },
-      );
-    }
-  }
-
-  /** 读取一个 Profile 的自动发现和手动 Model Catalog 条目。 */
-  async getCatalog(profileId: string): Promise<ModelCatalog> {
-    const profile = await this.findProfile(profileId);
-    const entries = await this.client.modelCatalogEntry.findMany({
-      where: { profileId },
-      orderBy: [{ modelName: "asc" }, { id: "asc" }],
-    });
-    return {
-      profileId,
-      entries: entries.map(serializeCatalogEntry),
-      refreshedAt: profile.catalogRefreshedAt?.toISOString() ?? null,
-    };
-  }
-
-  /** 添加手动模型名称；同一 Profile 下模型名称必须唯一。 */
-  async addManualModel(
-    profileId: string,
-    modelName: string,
-  ): Promise<ModelCatalogEntry> {
-    await this.findProfile(profileId);
-    try {
-      const record = await this.client.modelCatalogEntry.create({
-        data: {
-          id: createId("catalog"),
-          profileId,
-          modelName: modelName.trim(),
-          source: "manual",
-        },
-      });
-      this.logger.info(
-        { catalogEntryId: record.id, modelProfileId: profileId },
-        "手动 Model Catalog 条目创建完成",
-      );
-      return serializeCatalogEntry(record);
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "P2002") {
-        throw new ModelProfileServiceError(
-          "model_conflict",
-          "该模型已经存在于 Model Catalog",
-        );
-      }
-      throw error;
-    }
-  }
-
-  /** 只删除手动条目；若它正被选中，同时清空 Current Model Selection。 */
-  async removeManualModel(profileId: string, entryId: string): Promise<void> {
-    const entry = await this.client.modelCatalogEntry.findFirst({
-      where: { id: entryId, profileId, source: "manual" },
-    });
-    if (!entry) {
-      throw new ModelProfileServiceError("model_not_found", "手动模型条目不存在");
-    }
-    await ensureSettings(this.client);
-    await this.client.$transaction(async (transaction) => {
-      await transaction.modelCatalogEntry.delete({ where: { id: entryId } });
-      const settings = await transaction.harnessSettings.findUniqueOrThrow({
-        where: { id: SETTINGS_ID },
-      });
-      if (
-        settings.currentModelProfileId === profileId &&
-        settings.currentModelName === entry.modelName
-      ) {
-        await transaction.harnessSettings.update({
-          where: { id: SETTINGS_ID },
-          data: { currentModelProfileId: null, currentModelName: null },
-        });
-      }
-    });
-    this.logger.info(
-      { catalogEntryId: entryId, modelProfileId: profileId },
-      "手动 Model Catalog 条目删除完成",
-    );
-  }
-
   /** 读取 Harness Instance 中所有 Client 共享的 Current Model Selection。 */
   async getCurrentSelection(): Promise<CurrentModelSelection> {
     await ensureSettings(this.client);
@@ -587,22 +417,19 @@ export class ModelProfileService {
     };
   }
 
-  /** 设置或清空 Current Model Selection，非 Catalog 模型不能被选中。 */
+  /** 设置或清空 Current Model Selection，选择必须匹配一条完整模型配置。 */
   async setCurrentSelection(
     selection: ModelSelection | null,
   ): Promise<CurrentModelSelection> {
     await ensureSettings(this.client);
     if (selection) {
-      const entry = await this.client.modelCatalogEntry.findFirst({
-        where: {
-          profileId: selection.profileId,
-          modelName: selection.modelName,
-        },
+      const profile = await this.client.modelProfile.findUnique({
+        where: { id: selection.profileId },
       });
-      if (!entry) {
+      if (!profile || profile.modelName !== selection.modelName) {
         throw new ModelProfileServiceError(
           "model_not_found",
-          "Model Selection 不在该 Profile 的 Model Catalog 中",
+          "Model Selection 与模型配置不匹配",
         );
       }
     }
@@ -668,45 +495,6 @@ export class ModelProfileService {
       source: "local",
       reference: id,
       maskedValue: maskSecret(input.secretValue as string),
-    };
-  }
-
-  private async fetchModels(profile: {
-    baseUrl: string;
-    secretSource: string;
-    secretReference: string;
-  }): Promise<{ modelNames: string[]; latencyMs: number }> {
-    const store = this.stores[profile.secretSource as "local" | "keychain" | "environment"];
-    const secret = await store.get(profile.secretReference);
-    if (secret === null) {
-      throw new ModelProfileServiceError("secret_not_found", "找不到模型密钥");
-    }
-    const startedAt = performance.now();
-    const response = await this.fetchImplementation(
-      `${profile.baseUrl}/models`,
-      {
-        headers: { Authorization: `Bearer ${secret}` },
-        signal: AbortSignal.timeout(10_000),
-      },
-    );
-    const latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
-    if (!response.ok) {
-      throw new ModelProfileServiceError(
-        "model_connection_failed",
-        `模型服务返回 HTTP ${response.status}`,
-        { status: response.status },
-      );
-    }
-    const parsed = modelsResponseSchema.safeParse(await response.json());
-    if (!parsed.success) {
-      throw new ModelProfileServiceError(
-        "model_connection_failed",
-        "模型列表响应格式无效",
-      );
-    }
-    return {
-      modelNames: [...new Set(parsed.data.data.map(({ id }) => id))].sort(),
-      latencyMs,
     };
   }
 

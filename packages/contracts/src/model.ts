@@ -36,30 +36,12 @@ export const modelProfileSchema = z
   .object({
     id: entityIdSchema,
     displayName: z.string().trim().min(1).max(100),
+    modelName: z.string().trim().min(1).max(200),
     baseUrl: z.url(),
     secret: secretReferenceSchema,
     connection: modelConnectionSchema,
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
-  })
-  .strict();
-
-export const modelCatalogEntrySchema = z
-  .object({
-    id: entityIdSchema,
-    profileId: entityIdSchema,
-    modelName: z.string().trim().min(1).max(200),
-    source: z.enum(["discovered", "manual"]),
-    createdAt: isoDateTimeSchema,
-    updatedAt: isoDateTimeSchema,
-  })
-  .strict();
-
-export const modelCatalogSchema = z
-  .object({
-    profileId: entityIdSchema,
-    entries: z.array(modelCatalogEntrySchema),
-    refreshedAt: isoDateTimeSchema.nullable(),
   })
   .strict();
 
@@ -89,8 +71,6 @@ export const modelParametersSchema = z
 export type SecretReference = z.infer<typeof secretReferenceSchema>;
 export type ModelConnection = z.infer<typeof modelConnectionSchema>;
 export type ModelProfile = z.infer<typeof modelProfileSchema>;
-export type ModelCatalogEntry = z.infer<typeof modelCatalogEntrySchema>;
-export type ModelCatalog = z.infer<typeof modelCatalogSchema>;
 export type ModelSelection = z.infer<typeof modelSelectionSchema>;
 export type CurrentModelSelection = z.infer<
   typeof currentModelSelectionSchema

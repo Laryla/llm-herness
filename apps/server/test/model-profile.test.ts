@@ -62,6 +62,8 @@ async function createTestContext(
   for (const migrationName of [
     "20260819000100_init",
     "20260819000200_model_catalog_refresh",
+    "20260819000300_tool_confirmation_calls",
+    "20260820000100_unify_model_profile",
   ]) {
     const migration = await readFile(
       new URL(
@@ -105,11 +107,13 @@ describe("Model Profile", () => {
 
     const first = await service.create({
       displayName: "OpenAI",
+      modelName: "gpt-a",
       baseUrl: "https://api.openai.com/v1/",
       secretValue: "sk-first-secret",
     });
     const second = await service.create({
       displayName: "环境模型",
+      modelName: "model-env",
       baseUrl: "http://127.0.0.1:8000/v1",
       secretEnvironmentVariable: "MODEL_API_KEY",
     });
@@ -137,11 +141,12 @@ describe("Model Profile", () => {
     const { database, service } = await createTestContext(request);
     const profile = await service.create({
       displayName: "兼容服务",
+      modelName: "model-a",
       baseUrl: "http://127.0.0.1:9000/v1",
       secretValue: "connection-secret",
     });
 
-    const tested = await service.testConnection(profile.id, "model-a");
+    const tested = await service.testConnection(profile.id);
 
     expect(tested.connection.status).toBe("succeeded");
     expect(request).toHaveBeenCalledWith(
@@ -161,11 +166,12 @@ describe("Model Profile", () => {
     const { database, service } = await createTestContext(request);
     const profile = await service.create({
       displayName: "失败服务",
+      modelName: "model-a",
       baseUrl: "http://127.0.0.1:9000/v1",
       secretValue: "contains-secret",
     });
 
-    const tested = await service.testConnection(profile.id, "model-a");
+    const tested = await service.testConnection(profile.id);
 
     expect(tested.connection).toMatchObject({
       status: "failed",
@@ -182,11 +188,12 @@ describe("Model Profile", () => {
     const { database, service } = await createTestContext(request, logger);
     const profile = await service.create({
       displayName: "不可达服务",
+      modelName: "model-a",
       baseUrl: "http://127.0.0.1:9000/v1",
       secretValue: "must-not-appear",
     });
 
-    await service.testConnection(profile.id, "model-a");
+    await service.testConnection(profile.id);
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -202,37 +209,11 @@ describe("Model Profile", () => {
     await database.disconnect();
   });
 
-  it("刷新发现模型并保留同名手动条目", async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          data: [{ id: "model-b" }, { id: "model-a" }, { id: "model-a" }],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-    const { database, service } = await createTestContext(request);
-    const profile = await service.create({
-      displayName: "目录服务",
-      baseUrl: "http://127.0.0.1:9000/v1",
-      secretValue: "catalog-secret",
-    });
-    await service.addManualModel(profile.id, "model-a");
-
-    const catalog = await service.refreshCatalog(profile.id);
-
-    expect(catalog.refreshedAt).not.toBeNull();
-    expect(catalog.entries.map(({ modelName, source }) => [modelName, source])).toEqual([
-      ["model-a", "manual"],
-      ["model-b", "discovered"],
-    ]);
-    await database.disconnect();
-  });
-
-  it("Current Model Selection 只能选择 Catalog 中的模型", async () => {
+  it("Current Model Selection 只能选择与 Profile 匹配的模型", async () => {
     const { database, service } = await createTestContext();
     const profile = await service.create({
       displayName: "选择服务",
+      modelName: "manual-model",
       baseUrl: "http://127.0.0.1:9000/v1",
       secretValue: "selection-secret",
     });
@@ -240,7 +221,6 @@ describe("Model Profile", () => {
     await expect(
       service.setCurrentSelection({ profileId: profile.id, modelName: "missing" }),
     ).rejects.toMatchObject({ code: "model_not_found" });
-    await service.addManualModel(profile.id, "manual-model");
     await expect(
       service.setCurrentSelection({
         profileId: profile.id,
@@ -264,7 +244,8 @@ describe("Model Profile", () => {
       method: "POST",
       url: "/api/v1/model-profiles",
       payload: {
-        displayName: "REST Profile",
+      displayName: "REST Profile",
+      modelName: "rest-model",
         baseUrl: "http://127.0.0.1:9000/v1",
         secretValue: "rest-secret",
       },

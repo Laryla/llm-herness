@@ -5,7 +5,6 @@ import { conversationSchema, turnSchema } from "./conversation.js";
 import { messageSchema, traceSchema } from "./message.js";
 import {
   currentModelSelectionSchema,
-  modelCatalogSchema,
   modelProfileSchema,
   modelSelectionSchema,
 } from "./model.js";
@@ -36,6 +35,7 @@ export const setCurrentWorkspaceRequestSchema = z
 const modelProfileMutationSchema = z
   .object({
     displayName: z.string().trim().min(1).max(100),
+    modelName: z.string().trim().min(1).max(200),
     baseUrl: z.url(),
     secretValue: z.string().min(1).optional(),
     secretEnvironmentVariable: z
@@ -55,6 +55,7 @@ export const createModelProfileRequestSchema = modelProfileMutationSchema;
 export const updateModelProfileRequestSchema = z
   .object({
     displayName: z.string().trim().min(1).max(100).optional(),
+    modelName: z.string().trim().min(1).max(200).optional(),
     baseUrl: z.url().optional(),
     secretValue: z.string().min(1).optional(),
     secretEnvironmentVariable: z
@@ -68,14 +69,6 @@ export const updateModelProfileRequestSchema = z
       secretValue === undefined || secretEnvironmentVariable === undefined,
     { message: "不能同时提供两种密钥来源" },
   );
-
-export const createManualModelRequestSchema = z
-  .object({ modelName: z.string().trim().min(1).max(200) })
-  .strict();
-
-export const testModelConnectionRequestSchema = z
-  .object({ modelName: z.string().trim().min(1).max(200) })
-  .strict();
 
 export const setCurrentModelSelectionRequestSchema = z
   .object({ selection: modelSelectionSchema.nullable() })
@@ -112,9 +105,6 @@ export const modelProfileResponseSchema = createSuccessEnvelopeSchema(
 );
 export const modelProfileListResponseSchema = createSuccessEnvelopeSchema(
   z.array(modelProfileSchema),
-);
-export const modelCatalogResponseSchema = createSuccessEnvelopeSchema(
-  modelCatalogSchema,
 );
 export const currentModelSelectionResponseSchema = createSuccessEnvelopeSchema(
   currentModelSelectionSchema,
@@ -157,12 +147,6 @@ export type CreateModelProfileRequest = z.infer<
 >;
 export type UpdateModelProfileRequest = z.infer<
   typeof updateModelProfileRequestSchema
->;
-export type CreateManualModelRequest = z.infer<
-  typeof createManualModelRequestSchema
->;
-export type TestModelConnectionRequest = z.infer<
-  typeof testModelConnectionRequestSchema
 >;
 export type CreateConversationRequest = z.infer<
   typeof createConversationRequestSchema

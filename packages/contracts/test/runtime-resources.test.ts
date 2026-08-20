@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  modelCatalogSchema,
   queuedMessageSchema,
   steeringMessageSchema,
   toolBindingSnapshotSchema,
@@ -11,25 +10,6 @@ import {
 const occurredAt = "2026-08-19T12:00:00.000Z";
 
 describe("运行资源契约", () => {
-  it("Model Catalog 区分自动发现与手动条目", () => {
-    const catalog = modelCatalogSchema.parse({
-      profileId: "profile_01JABCDEF0123456789",
-      refreshedAt: occurredAt,
-      entries: [
-        {
-          id: "catalog_01JABCDEF0123456789",
-          profileId: "profile_01JABCDEF0123456789",
-          modelName: "model-a",
-          source: "discovered",
-          createdAt: occurredAt,
-          updatedAt: occurredAt,
-        },
-      ],
-    });
-
-    expect(catalog.entries[0]?.source).toBe("discovered");
-  });
-
   it("Tool Binding 快照拒绝重复模型函数名", () => {
     const tool = {
       id: "tool_calculator",

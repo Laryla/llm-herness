@@ -1,12 +1,8 @@
 import {
   currentModelSelectionSchema,
-  modelCatalogEntrySchema,
-  modelCatalogSchema,
   modelProfileSchema,
   type CreateModelProfileRequest,
   type CurrentModelSelection,
-  type ModelCatalog,
-  type ModelCatalogEntry,
   type ModelProfile,
   type ModelSelection,
   type UpdateModelProfileRequest,
@@ -29,20 +25,8 @@ export function updateModelProfile(profileId: string, input: UpdateModelProfileR
   return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}`, modelProfileSchema, { method: "PATCH", body: JSON.stringify(input) });
 }
 
-export function testModelProfile(profileId: string, modelName: string): Promise<ModelProfile> {
-  return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}/test-connection`, modelProfileSchema, { method: "POST", body: JSON.stringify({ modelName }) });
-}
-
-export function getModelCatalog(profileId: string): Promise<ModelCatalog> {
-  return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}/models`, modelCatalogSchema);
-}
-
-export function refreshModelCatalog(profileId: string): Promise<ModelCatalog> {
-  return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}/models/refresh`, modelCatalogSchema, { method: "POST" });
-}
-
-export function addManualModel(profileId: string, modelName: string): Promise<ModelCatalogEntry> {
-  return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}/models`, modelCatalogEntrySchema, { method: "POST", body: JSON.stringify({ modelName }) });
+export function testModelProfile(profileId: string): Promise<ModelProfile> {
+  return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}/test-connection`, modelProfileSchema, { method: "POST" });
 }
 
 export function getCurrentModelSelection(): Promise<CurrentModelSelection> {
