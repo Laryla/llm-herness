@@ -48,6 +48,7 @@ export function useModels() {
   const testConnection = useCallback(async (profileId: string) => {
     const updated = await mutate(() => testModelProfile(profileId));
     if (updated) setProfiles((items) => items.map((profile) => profile.id === updated.id ? updated : profile));
+    return updated;
   }, []);
   const refreshCatalog = useCallback(async () => {
     if (!selectedProfileId) return;
