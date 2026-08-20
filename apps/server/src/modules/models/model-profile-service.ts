@@ -75,6 +75,34 @@ function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+/** 生成可安全写入日志的上游地址，移除 URL 中可能携带的凭据和查询参数。 */
+function createSafeUpstreamUrl(baseUrl: string, path: string): string {
+  const url = new URL(`${normalizeBaseUrl(baseUrl)}${path}`);
+  url.username = "";
+  url.password = "";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+/** 保留排障所需异常对象及契约详情，由 Pino 通过 `err` 字段输出名称、消息和堆栈。 */
+function createConnectionLogContext(
+  error: unknown,
+  contractError: ContractError,
+  profile: { baseUrl: string },
+  path: string,
+): Record<string, unknown> {
+  return {
+    err: error,
+    errorCode: contractError.code,
+    errorDetails: contractError.details,
+    errorMessage: contractError.message,
+    requestUrl: createSafeUpstreamUrl(profile.baseUrl, path),
+    retryable: contractError.retryable,
+    upstreamStatus: contractError.details?.status,
+  };
+}
+
 function serializeConnection(record: {
   connectionStatus: string;
   connectionTestedAt: Date | null;
@@ -346,14 +374,11 @@ export class ModelProfileService {
     this.logger.info({ modelProfileId: id }, "Model Profile 删除完成");
   }
 
-  /**
-   * 请求上游 `/models` 测试连接并持久化状态。
-   * 失败只记录结构化错误，不记录响应正文、Authorization 或真实密钥。
-   */
-  async testConnection(id: string): Promise<ModelProfile> {
+  /** 发送最小 Chat Completions 请求测试连接，不依赖供应商可选的模型列表接口。 */
+  async testConnection(id: string, modelName: string): Promise<ModelProfile> {
     const profile = await this.findProfile(id);
     try {
-      const { latencyMs } = await this.fetchModels(profile);
+      const { latencyMs } = await this.fetchChatCompletion(profile, modelName);
       const record = await this.client.modelProfile.update({
         where: { id },
         data: {
@@ -364,7 +389,7 @@ export class ModelProfileService {
         },
       });
       this.logger.info(
-        { latencyMs, modelProfileId: id },
+        { latencyMs, modelName, modelProfileId: id },
         "Model Profile 连接测试成功",
       );
       return serializeProfile(record);
@@ -381,9 +406,9 @@ export class ModelProfileService {
       });
       this.logger.warn(
         {
-          errorCode: contractError.code,
+          ...createConnectionLogContext(error, contractError, profile, "/chat/completions"),
+          modelName,
           modelProfileId: id,
-          retryable: contractError.retryable,
         },
         "Model Profile 连接测试失败",
       );
@@ -425,10 +450,6 @@ export class ModelProfileService {
           where: { id },
           data: {
             catalogRefreshedAt: refreshedAt,
-            connectionStatus: "succeeded",
-            connectionTestedAt: refreshedAt,
-            connectionLatencyMs: latencyMs,
-            connectionError: Prisma.JsonNull,
           },
         });
         const settings = await transaction.harnessSettings.findUnique({
@@ -458,20 +479,10 @@ export class ModelProfileService {
       return this.getCatalog(id);
     } catch (error) {
       const contractError = this.toConnectionError(error);
-      await this.client.modelProfile.update({
-        where: { id },
-        data: {
-          connectionStatus: "failed",
-          connectionTestedAt: new Date(),
-          connectionLatencyMs: null,
-          connectionError: contractError as unknown as Prisma.InputJsonValue,
-        },
-      });
       this.logger.warn(
         {
-          errorCode: contractError.code,
+          ...createConnectionLogContext(error, contractError, profile, "/models"),
           modelProfileId: id,
-          retryable: contractError.retryable,
         },
         "Model Catalog 刷新失败",
       );
@@ -697,6 +708,44 @@ export class ModelProfileService {
       modelNames: [...new Set(parsed.data.data.map(({ id }) => id))].sort(),
       latencyMs,
     };
+  }
+
+  private async fetchChatCompletion(
+    profile: { baseUrl: string; secretSource: string; secretReference: string },
+    modelName: string,
+  ): Promise<{ latencyMs: number }> {
+    const store = this.stores[profile.secretSource as "local" | "keychain" | "environment"];
+    const secret = await store.get(profile.secretReference);
+    if (secret === null) {
+      throw new ModelProfileServiceError("secret_not_found", "找不到模型密钥");
+    }
+    const startedAt = performance.now();
+    const response = await this.fetchImplementation(
+      `${profile.baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${secret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: modelName.trim(),
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    const latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
+    if (!response.ok) {
+      throw new ModelProfileServiceError(
+        "model_connection_failed",
+        `模型服务返回 HTTP ${response.status}`,
+        { status: response.status },
+      );
+    }
+    return { latencyMs };
   }
 
   private toConnectionError(error: unknown): ContractError {

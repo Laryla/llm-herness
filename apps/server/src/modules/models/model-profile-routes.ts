@@ -3,6 +3,7 @@ import {
   createManualModelRequestSchema,
   createModelProfileRequestSchema,
   setCurrentModelSelectionRequestSchema,
+  testModelConnectionRequestSchema,
   updateModelProfileRequestSchema,
 } from "@llm-harness/contracts";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -118,14 +119,21 @@ export function registerModelProfileRoutes(
     },
   );
 
-  // 调用上游 `/models` 验证地址与 Bearer 密钥，并保存连接结果。
+  // 发送最小 Chat Completions 请求验证地址、模型与密钥，不依赖可选的 `/models`。
   app.post<{ Params: { profileId: string } }>(
     "/api/v1/model-profiles/:profileId/test-connection",
     async (request, reply) => {
+      const parsed = testModelConnectionRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return invalidRequest(reply, "模型连接测试参数无效", parsed.error.issues);
+      }
       try {
         return {
           apiVersion: API_VERSION,
-          data: await service.testConnection(request.params.profileId),
+          data: await service.testConnection(
+            request.params.profileId,
+            parsed.data.modelName,
+          ),
         };
       } catch (error) {
         return sendError(reply, error);

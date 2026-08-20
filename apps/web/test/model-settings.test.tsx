@@ -38,8 +38,9 @@ describe("模型连接测试", () => {
     render(<ModelSettings state={modelState(testConnection)} />);
 
     expect(screen.getByText("模型服务返回 HTTP 401")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "连接测试模型" }), { target: { value: "model-a" } });
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
-    expect(testConnection).toHaveBeenCalledWith(failedProfile.id);
+    expect(testConnection).toHaveBeenCalledWith(failedProfile.id, "model-a");
   });
 
   it("预填已有配置并在密钥留空时保留原密钥", async () => {

@@ -29,8 +29,8 @@ export function updateModelProfile(profileId: string, input: UpdateModelProfileR
   return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}`, modelProfileSchema, { method: "PATCH", body: JSON.stringify(input) });
 }
 
-export function testModelProfile(profileId: string): Promise<ModelProfile> {
-  return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}/test-connection`, modelProfileSchema, { method: "POST" });
+export function testModelProfile(profileId: string, modelName: string): Promise<ModelProfile> {
+  return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}/test-connection`, modelProfileSchema, { method: "POST", body: JSON.stringify({ modelName }) });
 }
 
 export function getModelCatalog(profileId: string): Promise<ModelCatalog> {

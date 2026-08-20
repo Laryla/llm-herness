@@ -73,6 +73,10 @@ export const createManualModelRequestSchema = z
   .object({ modelName: z.string().trim().min(1).max(200) })
   .strict();
 
+export const testModelConnectionRequestSchema = z
+  .object({ modelName: z.string().trim().min(1).max(200) })
+  .strict();
+
 export const setCurrentModelSelectionRequestSchema = z
   .object({ selection: modelSelectionSchema.nullable() })
   .strict();
@@ -156,6 +160,9 @@ export type UpdateModelProfileRequest = z.infer<
 >;
 export type CreateManualModelRequest = z.infer<
   typeof createManualModelRequestSchema
+>;
+export type TestModelConnectionRequest = z.infer<
+  typeof testModelConnectionRequestSchema
 >;
 export type CreateConversationRequest = z.infer<
   typeof createConversationRequestSchema

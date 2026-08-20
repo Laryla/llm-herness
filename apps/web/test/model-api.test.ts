@@ -3,7 +3,7 @@
 import { API_VERSION } from "@llm-harness/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createModelProfile, setCurrentModelSelection, updateModelProfile } from "../src/domains/models/api/model-api.js";
+import { createModelProfile, setCurrentModelSelection, testModelProfile, updateModelProfile } from "../src/domains/models/api/model-api.js";
 
 describe("Model API", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -34,5 +34,17 @@ describe("Model API", () => {
     await updateModelProfile(profile.id, { displayName: profile.displayName, baseUrl: profile.baseUrl });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/model-profiles/profile_test", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ displayName: profile.displayName, baseUrl: profile.baseUrl }) }));
+  });
+
+  it("连接测试携带具体模型名称调用 Chat Completions 测试接口", async () => {
+    const profile = { id: "profile_test", displayName: "OpenAI", baseUrl: "https://api.openai.com/v1", secret: { source: "local", reference: "profile_test", maskedValue: "••••test" }, connection: { status: "succeeded", testedAt: "2026-08-20T00:00:00.000Z", latencyMs: 10 }, createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ apiVersion: API_VERSION, data: profile })));
+
+    await testModelProfile(profile.id, "gpt-4.1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/model-profiles/profile_test/test-connection",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ modelName: "gpt-4.1" }) }),
+    );
   });
 });

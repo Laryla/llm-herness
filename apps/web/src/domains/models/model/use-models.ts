@@ -45,8 +45,8 @@ export function useModels() {
     if (created) { setProfiles((items) => [...items, created]); setSelectedProfileId(created.id); }
     return created;
   }, []);
-  const testConnection = useCallback(async (profileId: string) => {
-    const updated = await mutate(() => testModelProfile(profileId));
+  const testConnection = useCallback(async (profileId: string, modelName: string) => {
+    const updated = await mutate(() => testModelProfile(profileId, modelName));
     if (updated) setProfiles((items) => items.map((profile) => profile.id === updated.id ? updated : profile));
     return updated;
   }, []);

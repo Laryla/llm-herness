@@ -51,7 +51,10 @@ afterEach(async () => {
   );
 });
 
-async function createTestContext(fetchImplementation: typeof fetch = fetch) {
+async function createTestContext(
+  fetchImplementation: typeof fetch = fetch,
+  logger?: ConstructorParameters<typeof ModelProfileService>[3],
+) {
   const root = await mkdtemp(join(tmpdir(), "llm-harness-model-profile-"));
   temporaryDirectories.push(root);
   const databasePath = join(root, "harness.db");
@@ -84,6 +87,7 @@ async function createTestContext(fetchImplementation: typeof fetch = fetch) {
     database.client,
     { keychain, local, environment, writable: local },
     fetchImplementation,
+    logger,
   );
   return {
     database,
@@ -137,13 +141,14 @@ describe("Model Profile", () => {
       secretValue: "connection-secret",
     });
 
-    const tested = await service.testConnection(profile.id);
+    const tested = await service.testConnection(profile.id, "model-a");
 
     expect(tested.connection.status).toBe("succeeded");
     expect(request).toHaveBeenCalledWith(
-      "http://127.0.0.1:9000/v1/models",
+      "http://127.0.0.1:9000/v1/chat/completions",
       expect.objectContaining({
-        headers: { Authorization: "Bearer connection-secret" },
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer connection-secret" }),
       }),
     );
     await database.disconnect();
@@ -160,13 +165,40 @@ describe("Model Profile", () => {
       secretValue: "contains-secret",
     });
 
-    const tested = await service.testConnection(profile.id);
+    const tested = await service.testConnection(profile.id, "model-a");
 
     expect(tested.connection).toMatchObject({
       status: "failed",
       error: { code: "model_connection_failed", retryable: false },
     });
     expect(JSON.stringify(tested)).not.toContain("contains-secret");
+    await database.disconnect();
+  });
+
+  it("连接失败日志包含请求地址、错误详情和原始异常", async () => {
+    const upstreamError = new TypeError("fetch failed");
+    const request = vi.fn<typeof fetch>().mockRejectedValue(upstreamError);
+    const logger = { info: vi.fn(), warn: vi.fn() };
+    const { database, service } = await createTestContext(request, logger);
+    const profile = await service.create({
+      displayName: "不可达服务",
+      baseUrl: "http://127.0.0.1:9000/v1",
+      secretValue: "must-not-appear",
+    });
+
+    await service.testConnection(profile.id, "model-a");
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: "model_connection_failed",
+        errorMessage: "无法连接模型服务",
+        modelProfileId: profile.id,
+        requestUrl: "http://127.0.0.1:9000/v1/chat/completions",
+        err: upstreamError,
+      }),
+      "Model Profile 连接测试失败",
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("must-not-appear");
     await database.disconnect();
   });
 
