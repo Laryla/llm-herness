@@ -9,6 +9,7 @@ import {
   type ModelCatalogEntry,
   type ModelProfile,
   type ModelSelection,
+  type UpdateModelProfileRequest,
 } from "@llm-harness/contracts";
 import { z } from "zod";
 
@@ -21,6 +22,11 @@ export function listModelProfiles(): Promise<ModelProfile[]> {
 /** secretValue 只发送给 Server 写入本地 config.json，响应永远只有脱敏引用。 */
 export function createModelProfile(input: CreateModelProfileRequest): Promise<ModelProfile> {
   return requestApi("/api/v1/model-profiles", modelProfileSchema, { method: "POST", body: JSON.stringify(input) });
+}
+
+/** 更新 Profile；不携带密钥字段时保留现有密钥引用。 */
+export function updateModelProfile(profileId: string, input: UpdateModelProfileRequest): Promise<ModelProfile> {
+  return requestApi(`/api/v1/model-profiles/${encodeURIComponent(profileId)}`, modelProfileSchema, { method: "PATCH", body: JSON.stringify(input) });
 }
 
 export function testModelProfile(profileId: string): Promise<ModelProfile> {

@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ModelProfile } from "@llm-harness/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelSettings } from "../src/domains/models/components/model-settings.js";
 import type { useModels } from "../src/domains/models/model/use-models.js";
+
+afterEach(cleanup);
 
 const failedProfile: ModelProfile = {
   id: "profile_test",
@@ -26,6 +28,7 @@ function modelState(testConnection = vi.fn().mockResolvedValue(failedProfile)) {
     addModel: vi.fn(), catalog: { profileId: failedProfile.id, entries: [], refreshedAt: null }, createProfile: vi.fn(), currentSelection: null,
     error: null, loading: false, profiles: [failedProfile], refreshCatalog: vi.fn(), reload: vi.fn(), saving: false, selectModel: vi.fn(),
     selectedProfileId: failedProfile.id, setSelectedProfileId: vi.fn(), testConnection,
+    updateProfile: vi.fn().mockResolvedValue(failedProfile),
   } as unknown as ReturnType<typeof useModels>;
 }
 
@@ -37,5 +40,17 @@ describe("模型连接测试", () => {
     expect(screen.getByText("模型服务返回 HTTP 401")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     expect(testConnection).toHaveBeenCalledWith(failedProfile.id);
+  });
+
+  it("预填已有配置并在密钥留空时保留原密钥", async () => {
+    const state = modelState();
+    render(<ModelSettings state={state} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑模型服务" }));
+    expect(screen.getByRole("textbox", { name: "模型服务名称" })).toHaveProperty("value", failedProfile.displayName);
+    fireEvent.change(screen.getByRole("textbox", { name: "模型服务名称" }), { target: { value: "更新后的名称" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(state.updateProfile).toHaveBeenCalledWith(failedProfile.id, { displayName: "更新后的名称", baseUrl: failedProfile.baseUrl }));
   });
 });

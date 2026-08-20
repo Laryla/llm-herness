@@ -3,7 +3,7 @@
 import { API_VERSION } from "@llm-harness/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createModelProfile, setCurrentModelSelection } from "../src/domains/models/api/model-api.js";
+import { createModelProfile, setCurrentModelSelection, updateModelProfile } from "../src/domains/models/api/model-api.js";
 
 describe("Model API", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -25,5 +25,14 @@ describe("Model API", () => {
     await setCurrentModelSelection(selection);
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/current-model-selection", expect.objectContaining({ method: "PUT", body: JSON.stringify({ selection }) }));
+  });
+
+  it("编辑 Profile 时可以保留现有密钥", async () => {
+    const profile = { id: "profile_test", displayName: "新名称", baseUrl: "https://example.com/v1", secret: { source: "local", reference: "profile_test", maskedValue: "••••test" }, connection: { status: "untested" }, createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ apiVersion: API_VERSION, data: profile })));
+
+    await updateModelProfile(profile.id, { displayName: profile.displayName, baseUrl: profile.baseUrl });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/model-profiles/profile_test", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ displayName: profile.displayName, baseUrl: profile.baseUrl }) }));
   });
 });

@@ -1,7 +1,7 @@
-import type { CreateModelProfileRequest, ModelCatalog, ModelProfile, ModelSelection } from "@llm-harness/contracts";
+import type { CreateModelProfileRequest, ModelCatalog, ModelProfile, ModelSelection, UpdateModelProfileRequest } from "@llm-harness/contracts";
 import { useCallback, useEffect, useState } from "react";
 
-import { addManualModel, createModelProfile, getCurrentModelSelection, getModelCatalog, listModelProfiles, refreshModelCatalog, setCurrentModelSelection, testModelProfile } from "../api/model-api.js";
+import { addManualModel, createModelProfile, getCurrentModelSelection, getModelCatalog, listModelProfiles, refreshModelCatalog, setCurrentModelSelection, testModelProfile, updateModelProfile } from "../api/model-api.js";
 
 function message(error: unknown) { return error instanceof Error ? error.message : "模型配置请求失败"; }
 
@@ -50,6 +50,11 @@ export function useModels() {
     if (updated) setProfiles((items) => items.map((profile) => profile.id === updated.id ? updated : profile));
     return updated;
   }, []);
+  const updateProfile = useCallback(async (profileId: string, input: UpdateModelProfileRequest) => {
+    const updated = await mutate(() => updateModelProfile(profileId, input));
+    if (updated) setProfiles((items) => items.map((profile) => profile.id === updated.id ? updated : profile));
+    return updated;
+  }, []);
   const refreshCatalog = useCallback(async () => {
     if (!selectedProfileId) return;
     const next = await mutate(() => refreshModelCatalog(selectedProfileId));
@@ -67,5 +72,5 @@ export function useModels() {
     return current !== null;
   }, []);
 
-  return { addModel, catalog, createProfile, currentSelection, error, loading, profiles, refreshCatalog, reload, saving, selectModel, selectedProfileId, setSelectedProfileId, testConnection };
+  return { addModel, catalog, createProfile, currentSelection, error, loading, profiles, refreshCatalog, reload, saving, selectModel, selectedProfileId, setSelectedProfileId, testConnection, updateProfile };
 }
