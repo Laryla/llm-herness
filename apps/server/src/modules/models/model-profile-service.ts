@@ -519,7 +519,6 @@ export class ModelProfileService {
         body: JSON.stringify({
           model: modelName.trim(),
           messages: [{ role: "user", content: "ping" }],
-          max_tokens: 1,
           stream: false,
         }),
         signal: AbortSignal.timeout(10_000),

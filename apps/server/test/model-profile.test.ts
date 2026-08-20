@@ -156,6 +156,14 @@ describe("Model Profile", () => {
         headers: expect.objectContaining({ Authorization: "Bearer connection-secret" }),
       }),
     );
+    const requestBody = JSON.parse(
+      request.mock.calls[0]?.[1]?.body as string,
+    ) as Record<string, unknown>;
+    expect(requestBody).toEqual({
+      model: "model-a",
+      messages: [{ role: "user", content: "ping" }],
+      stream: false,
+    });
     await database.disconnect();
   });
 
