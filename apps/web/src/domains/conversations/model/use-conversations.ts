@@ -1,7 +1,7 @@
-import type { Conversation, Message, Turn } from "@llm-harness/contracts";
+import type { Conversation, Message, QueuedMessage, Turn } from "@llm-harness/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { createConversation, listConversations, listMessages, listTurns } from "../api/conversation-api.js";
+import { createConversation, listConversations, listMessages, listQueuedMessages, listTurns } from "../api/conversation-api.js";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Conversation 请求失败";
@@ -13,6 +13,7 @@ export function useConversations(workspaceId: string | null) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [loadingConversation, setLoadingConversation] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,6 +23,7 @@ export function useConversations(workspaceId: string | null) {
     setSelectedId(null);
     setMessages([]);
     setTurns([]);
+    setQueuedMessages([]);
   }, [workspaceId]);
 
   const reloadList = useCallback(async () => {
@@ -44,12 +46,12 @@ export function useConversations(workspaceId: string | null) {
 
   const reloadConversation = useCallback(async () => {
     if (!selectedId) {
-      setMessages([]); setTurns([]); return;
+      setMessages([]); setTurns([]); setQueuedMessages([]); return;
     }
     setLoadingConversation(true); setError(null);
     try {
-      const [nextMessages, nextTurns] = await Promise.all([listMessages(selectedId), listTurns(selectedId)]);
-      setMessages(nextMessages); setTurns(nextTurns);
+      const [nextMessages, nextTurns, nextQueuedMessages] = await Promise.all([listMessages(selectedId), listTurns(selectedId), listQueuedMessages(selectedId)]);
+      setMessages(nextMessages); setTurns(nextTurns); setQueuedMessages(nextQueuedMessages);
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
@@ -66,7 +68,7 @@ export function useConversations(workspaceId: string | null) {
 
   /** 清空选择进入新对话态，真正的记录会在用户首次发送时创建。 */
   const beginNewConversation = useCallback(() => {
-    setSelectedId(null); setMessages([]); setTurns([]); setError(null);
+    setSelectedId(null); setMessages([]); setTurns([]); setQueuedMessages([]); setError(null);
   }, []);
 
   /** 首次发送时延迟创建 Conversation，避免用户打开空白页就产生无内容记录。 */
@@ -79,5 +81,11 @@ export function useConversations(workspaceId: string | null) {
     return created;
   }, [selectedConversation, workspaceId]);
 
-  return { beginNewConversation, conversations, ensureConversation, error, loadingConversation, loadingList, messages, reloadConversation, reloadList, selectedConversation, selectedId, selectConversation: setSelectedId, turns };
+  const applyQueuedMessage = useCallback((message: QueuedMessage, deleted: boolean) => {
+    setQueuedMessages((items) => (deleted
+      ? items.filter(({ id }) => id !== message.id)
+      : [...items.filter(({ id }) => id !== message.id), message].sort((left, right) => left.position - right.position)));
+  }, []);
+
+  return { applyQueuedMessage, beginNewConversation, conversations, ensureConversation, error, loadingConversation, loadingList, messages, queuedMessages, reloadConversation, reloadList, selectedConversation, selectedId, selectConversation: setSelectedId, turns };
 }

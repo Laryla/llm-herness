@@ -110,13 +110,17 @@ export class AgentRuntimeGateway implements RuntimeGateway {
         this.steerTurn(command.conversationId, command.turnId, command.content);
         return;
       case "queued_message.create":
+        await this.createQueuedMessage(command.conversationId, command.content);
+        return;
       case "queued_message.update":
+        await this.updateQueuedMessage(command.conversationId, command.queuedMessageId, command.content);
+        return;
       case "queued_message.delete":
+        await this.deleteQueuedMessage(command.conversationId, command.queuedMessageId);
+        return;
       case "queued_message.reorder":
-        throw new RuntimeGatewayError(
-          "queued_messages_not_implemented",
-          "Queued Message 将在 Conversation 队列模块中实现",
-        );
+        await this.reorderQueuedMessages(command.conversationId, command.queuedMessageIds);
+        return;
       case "tool.confirm": {
         const active = this.requireActiveTurn(command.conversationId, command.turnId);
         if (
@@ -315,6 +319,66 @@ export class AgentRuntimeGateway implements RuntimeGateway {
     }
   }
 
+  /** 活动 Turn 期间的普通发送只进入持久化队列，不改变当前 Turn 的上下文。 */
+  private async createQueuedMessage(conversationId: string, content: string): Promise<void> {
+    this.requireActiveTurn(conversationId, this.activeByConversation.get(conversationId)?.turnId ?? "");
+    const tail = await this.client.queuedMessage.findFirst({
+      where: { conversationId },
+      orderBy: { position: "desc" },
+    });
+    const message = await this.client.queuedMessage.create({
+      data: {
+        id: createEntityId("queued"),
+        conversationId,
+        content,
+        position: (tail?.position ?? -1) + 1,
+        status: "queued",
+      },
+    });
+    this.publishQueuedMessage(message, "upserted");
+  }
+
+  private async updateQueuedMessage(conversationId: string, id: string, content: string): Promise<void> {
+    await this.requireQueuedMessage(conversationId, id, ["queued", "paused"]);
+    const message = await this.client.queuedMessage.update({ where: { id }, data: { content, status: "queued" } });
+    this.publishQueuedMessage(message, "upserted");
+    if (!this.activeByConversation.has(conversationId)) await this.processNextQueuedMessage(conversationId);
+  }
+
+  private async deleteQueuedMessage(conversationId: string, id: string): Promise<void> {
+    const message = await this.requireQueuedMessage(conversationId, id, ["queued", "paused"]);
+    await this.client.queuedMessage.delete({ where: { id } });
+    this.publishQueuedMessage(message, "deleted");
+    await this.compactQueuedMessagePositions(conversationId);
+  }
+
+  private async reorderQueuedMessages(conversationId: string, ids: readonly string[]): Promise<void> {
+    const current = await this.client.queuedMessage.findMany({
+      where: { conversationId, status: "queued" },
+      orderBy: { position: "asc" },
+    });
+    if (ids.length !== current.length || new Set(ids).size !== ids.length || ids.some((id) => !current.some((message) => message.id === id))) {
+      throw new RuntimeGatewayError("invalid_queue_order", "排序必须包含当前队列中的全部消息");
+    }
+    await this.client.$transaction(ids.map((id, index) => this.client.queuedMessage.update({ where: { id }, data: { position: -(index + 1) } })));
+    const reordered = await this.client.$transaction(ids.map((id, index) => this.client.queuedMessage.update({ where: { id }, data: { position: index } })));
+    for (const message of reordered) this.publishQueuedMessage(message, "upserted");
+  }
+
+  private async requireQueuedMessage(conversationId: string, id: string, statuses: readonly string[] = ["queued"]) {
+    const message = await this.client.queuedMessage.findFirst({ where: { id, conversationId, status: { in: [...statuses] } } });
+    if (!message) throw new RuntimeGatewayError("queued_message_not_found", "排队消息不存在或已经开始处理", false, id);
+    return message;
+  }
+
+  private async compactQueuedMessagePositions(conversationId: string): Promise<void> {
+    const messages = await this.client.queuedMessage.findMany({ where: { conversationId, status: "queued" }, orderBy: { position: "asc" } });
+    if (messages.every((message, index) => message.position === index)) return;
+    await this.client.$transaction(messages.map((message, index) => this.client.queuedMessage.update({ where: { id: message.id }, data: { position: -(index + 1) } })));
+    const compacted = await this.client.$transaction(messages.map((message, index) => this.client.queuedMessage.update({ where: { id: message.id }, data: { position: index } })));
+    for (const message of compacted) this.publishQueuedMessage(message, "upserted");
+  }
+
   private requireActiveTurn(conversationId: string, turnId: string): ActiveTurn {
     const active = this.activeByTurn.get(turnId);
     if (!active || active.conversationId !== conversationId) {
@@ -396,7 +460,65 @@ export class AgentRuntimeGateway implements RuntimeGateway {
     } finally {
       this.activeByConversation.delete(active.conversationId);
       this.activeByTurn.delete(active.turnId);
+      await this.processNextQueuedMessage(active.conversationId);
     }
+  }
+
+  /** Turn 结束后按队列顺序创建下一个 Turn；此刻读取的当前模型正是“下个 Turn”选择。 */
+  private async processNextQueuedMessage(conversationId: string): Promise<void> {
+    const queued = await this.client.queuedMessage.findFirst({
+      where: { conversationId, status: "queued" },
+      orderBy: { position: "asc" },
+    });
+    if (!queued) return;
+    const settings = await this.client.harnessSettings.findUnique({ where: { id: "settings_default" } });
+    if (!settings?.currentModelProfileId || !settings.currentModelName) {
+      const paused = await this.client.queuedMessage.update({ where: { id: queued.id }, data: { status: "paused" } });
+      this.publishQueuedMessage(paused, "upserted");
+      this.publish({ type: "runtime.error", entityId: queued.id, error: { code: "model_not_selected", message: "排队消息暂停：尚未选择模型", retryable: false } });
+      return;
+    }
+    const toolIds = Array.isArray(settings.currentToolIds)
+      ? settings.currentToolIds.filter((value): value is string => typeof value === "string")
+      : [];
+    const processing = await this.client.queuedMessage.update({ where: { id: queued.id }, data: { status: "processing" } });
+    this.publishQueuedMessage(processing, "upserted");
+    try {
+      await this.createTurn({
+        apiVersion: API_VERSION,
+        commandId: createEntityId("command"),
+        type: "turn.create",
+        conversationId,
+        content: queued.content,
+        modelSelection: { profileId: settings.currentModelProfileId, modelName: settings.currentModelName },
+        toolSelection: { toolIds },
+        modelParameters: {},
+      });
+      await this.client.queuedMessage.delete({ where: { id: queued.id } });
+      this.publishQueuedMessage(processing, "deleted");
+      await this.compactQueuedMessagePositions(conversationId);
+    } catch (error) {
+      const paused = await this.client.queuedMessage.update({ where: { id: queued.id }, data: { status: "paused" } });
+      this.publishQueuedMessage(paused, "upserted");
+      this.publish({ type: "runtime.error", entityId: queued.id, error: { code: "queued_message_failed", message: error instanceof Error ? error.message : "排队消息启动失败", retryable: false } });
+    }
+  }
+
+  private publishQueuedMessage(message: { id: string; conversationId: string; content: string; position: number; status: string; createdAt: Date; updatedAt: Date }, change: "upserted" | "deleted"): void {
+    this.publish({
+      type: "queued_message.changed",
+      conversationId: message.conversationId,
+      change,
+      queuedMessage: {
+        id: message.id,
+        conversationId: message.conversationId,
+        content: message.content,
+        position: message.position,
+        status: message.status as "queued" | "paused" | "processing",
+        createdAt: message.createdAt.toISOString(),
+        updatedAt: message.updatedAt.toISOString(),
+      },
+    });
   }
 
   /** 标题生成是非关键 Step；失败只记录 Step，不改变主 Turn 的成功结果。 */

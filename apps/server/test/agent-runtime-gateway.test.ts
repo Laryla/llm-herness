@@ -85,14 +85,16 @@ function decodeRawData(data: RawData): string {
   return data.toString("utf8");
 }
 
-function collectUntilCompleted(socket: WebSocket): Promise<Record<string, unknown>[]> {
+function collectUntilCompleted(socket: WebSocket, expectedTurns = 1): Promise<Record<string, unknown>[]> {
   const events: Record<string, unknown>[] = [];
+  let completedTurns = 0;
   return new Promise((resolve, reject) => {
     socket.on("message", (data) => {
       const event = JSON.parse(decodeRawData(data)) as Record<string, unknown>;
       events.push(event);
       if (event.type === "turn.status_changed" && event.status === "completed") {
-        resolve(events);
+        completedTurns += 1;
+        if (completedTurns === expectedTurns) resolve(events);
       }
       if ("error" in event) {
         reject(new Error(JSON.stringify(event.error)));
@@ -102,7 +104,7 @@ function collectUntilCompleted(socket: WebSocket): Promise<Record<string, unknow
 }
 
 describe("Agent Runtime Gateway", () => {
-  it("通过 WebSocket 创建 Turn，流式发布事件并持久化 Trace", async () => {
+  it("通过 WebSocket 完成 Turn，并按顺序启动持久化的排队消息", async () => {
     const upstream = Fastify();
     upstreamServers.push(upstream);
     upstream.post("/v1/chat/completions", async (_request, reply) => {
@@ -159,6 +161,15 @@ describe("Agent Runtime Gateway", () => {
         connectionStatus: "succeeded",
       },
     });
+    await database.client.harnessSettings.create({
+      data: {
+        id: "settings_default",
+        currentModelProfileId: "profile_runtime",
+        currentModelName: "model-a",
+        currentToolIds: [],
+        maxIterations: 8,
+      },
+    });
     const secrets = new MemorySecretStore();
     secrets.values.set("profile_runtime", "runtime-secret");
     const app = createApp({
@@ -169,7 +180,21 @@ describe("Agent Runtime Gateway", () => {
     harnessApps.push(app);
     await app.ready();
     const socket = await app.injectWS("/api/v1/runtime");
-    const completed = collectUntilCompleted(socket);
+    const completed = collectUntilCompleted(socket, 2);
+    let queuedMessageSent = false;
+    socket.on("message", (data) => {
+      const event = JSON.parse(decodeRawData(data)) as Record<string, unknown>;
+      if (!queuedMessageSent && event.type === "turn.status_changed" && event.status === "running") {
+        queuedMessageSent = true;
+        socket.send(JSON.stringify({
+          apiVersion: "v1",
+          commandId: "command_queue",
+          type: "queued_message.create",
+          conversationId: "conversation_runtime",
+          content: "排队继续运行",
+        }));
+      }
+    });
 
     socket.send(
       JSON.stringify({
@@ -200,19 +225,21 @@ describe("Agent Runtime Gateway", () => {
         "step.created",
         "step.content_delta",
         "step.status_changed",
+        "queued_message.changed",
       ]),
     );
-    const turn = await database.client.turn.findFirstOrThrow();
+    const turns = await database.client.turn.findMany({ orderBy: { createdAt: "asc" } });
     const steps = await database.client.step.findMany({ orderBy: { sequence: "asc" } });
     const messages = await database.client.message.findMany({ orderBy: { sequence: "asc" } });
     const conversation = await database.client.conversation.findUniqueOrThrow({
       where: { id: "conversation_runtime" },
     });
-    expect(turn).toMatchObject({ status: "completed", maxIterations: 8 });
-    expect(steps).toHaveLength(2);
-    expect(steps[0]).toMatchObject({ status: "completed", kind: "model" });
-    expect(steps[0]?.output).toMatchObject({ content: "运行完成" });
-    expect(steps[1]).toMatchObject({ status: "completed", kind: "title_generation" });
+    expect(turns).toHaveLength(2);
+    expect(turns).toEqual(expect.arrayContaining([expect.objectContaining({ status: "completed", maxIterations: 8 })]));
+    expect(steps).toHaveLength(3);
+    expect(steps.filter(({ kind }) => kind === "model")).toHaveLength(2);
+    expect(steps.filter(({ kind }) => kind === "model").every((step) => step.status === "completed" && (step.output as { content?: string } | null)?.content === "运行完成")).toBe(true);
+    expect(steps.find(({ kind }) => kind === "title_generation")).toMatchObject({ status: "completed" });
     expect(conversation).toMatchObject({
       title: "运行完成",
       titleSource: "generated",
@@ -220,7 +247,10 @@ describe("Agent Runtime Gateway", () => {
     expect(messages.map(({ role, content }) => [role, content])).toEqual([
       ["user", "开始运行"],
       ["assistant", "运行完成"],
+      ["user", "排队继续运行"],
+      ["assistant", "运行完成"],
     ]);
+    await expect(database.client.queuedMessage.count()).resolves.toBe(0);
     socket.close();
   });
 });

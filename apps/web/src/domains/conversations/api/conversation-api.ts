@@ -1,11 +1,13 @@
 import {
   conversationSchema,
   messageSchema,
+  queuedMessageSchema,
   turnSchema,
   traceSchema,
   type Conversation,
   type CreateConversationRequest,
   type Message,
+  type QueuedMessage,
   type Turn,
   type Trace,
 } from "@llm-harness/contracts";
@@ -35,6 +37,11 @@ export function listMessages(conversationId: string): Promise<Message[]> {
 /** 读取 Conversation 的 Turn 边界与运行状态。 */
 export function listTurns(conversationId: string): Promise<Turn[]> {
   return requestApi(`/api/v1/conversations/${encodeURIComponent(conversationId)}/turns`, z.array(turnSchema));
+}
+
+/** 从持久化状态恢复当前 Conversation 的消息队列。 */
+export function listQueuedMessages(conversationId: string): Promise<QueuedMessage[]> {
+  return requestApi(`/api/v1/conversations/${encodeURIComponent(conversationId)}/queued-messages`, z.array(queuedMessageSchema));
 }
 
 /** 读取单个 Turn 的完整 Iteration、Step 与 Steering Trace。 */

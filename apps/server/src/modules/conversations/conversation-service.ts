@@ -5,6 +5,7 @@ import type {
   CreateConversationRequest,
   Iteration,
   Message,
+  QueuedMessage,
   SteeringMessage,
   Trace,
   Turn,
@@ -153,6 +154,23 @@ export class ConversationService {
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
     return records.map(serializeTurn);
+  }
+
+  async listQueuedMessages(conversationId: string): Promise<QueuedMessage[]> {
+    await this.findConversation(conversationId);
+    const records = await this.client.queuedMessage.findMany({
+      where: { conversationId },
+      orderBy: [{ position: "asc" }, { id: "asc" }],
+    });
+    return records.map((record) => ({
+      id: record.id,
+      conversationId: record.conversationId,
+      content: record.content,
+      position: record.position,
+      status: record.status as QueuedMessage["status"],
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    }));
   }
 
   async getTrace(conversationId: string, turnId: string): Promise<Trace> {

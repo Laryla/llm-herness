@@ -145,6 +145,21 @@ export function registerConversationRoutes(
     },
   );
 
+  // WebSocket 重连或页面刷新后，用数据库中的队列恢复待发送消息。
+  app.get<{ Params: { conversationId: string } }>(
+    "/api/v1/conversations/:conversationId/queued-messages",
+    async (request, reply) => {
+      try {
+        return {
+          apiVersion: API_VERSION,
+          data: await service.listQueuedMessages(request.params.conversationId),
+        };
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+
   app.get<{ Params: { conversationId: string; turnId: string } }>(
     "/api/v1/conversations/:conversationId/turns/:turnId/trace",
     async (request, reply) => {

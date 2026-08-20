@@ -178,6 +178,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
       type: z.literal("queued_message.changed"),
       conversationId: entityIdSchema,
       queuedMessage: queuedMessageSchema,
+      change: z.enum(["upserted", "deleted"]),
     })
     .strict(),
   z
