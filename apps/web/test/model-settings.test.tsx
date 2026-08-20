@@ -56,7 +56,9 @@ describe("模型连接测试", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
 
-    expect(await screen.findByText("连接成功，已使用 model-a 完成测试")).toBeTruthy();
+    const toast = await screen.findByRole("status");
+    expect(toast.textContent).toContain("连接测试成功");
+    expect(toast.textContent).toContain("连接成功，已使用 model-a 完成测试");
   });
 
   it("预填已有配置并在密钥留空时保留原密钥", async () => {
