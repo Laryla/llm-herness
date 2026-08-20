@@ -1,0 +1,41 @@
+import type { FormEvent } from "react";
+import { useState } from "react";
+import { Plus, RefreshCw, Server } from "lucide-react";
+
+import type { useModels } from "../model/use-models.js";
+
+type ModelState = ReturnType<typeof useModels>;
+
+/** Model Profile 配置页；密钥输入在提交成功后立即随组件状态清空。 */
+export function ModelSettings({ state }: { state: ModelState }) {
+  const [formOpen, setFormOpen] = useState(state.profiles.length === 0);
+  const [displayName, setDisplayName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
+  const [secretValue, setSecretValue] = useState("");
+  const [secretMode, setSecretMode] = useState<"keychain" | "environment">("keychain");
+  const [manualModel, setManualModel] = useState("");
+
+  async function submitProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const created = await state.createProfile(secretMode === "keychain"
+      ? { displayName, baseUrl, secretValue }
+      : { displayName, baseUrl, secretEnvironmentVariable: secretValue });
+    if (!created) return;
+    setSecretValue(""); setDisplayName(""); setFormOpen(false);
+  }
+
+  async function submitModel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (await state.addModel(manualModel)) setManualModel("");
+  }
+
+  const selectedProfile = state.profiles.find(({ id }) => id === state.selectedProfileId);
+  return <section className="settings-content model-settings">
+    <div className="settings-heading"><span><strong>模型服务</strong><small>兼容 OpenAI Chat Completions 协议的服务端点</small></span><button onClick={() => setFormOpen((open) => !open)}><Plus />添加服务</button></div>
+    {formOpen && <form className="workspace-form model-profile-form" onSubmit={(event) => void submitProfile(event)}><label><span>显示名称</span><input aria-label="模型服务名称" onChange={(event) => setDisplayName(event.target.value)} placeholder="OpenAI" required value={displayName} /></label><label><span>Base URL</span><input aria-label="模型服务地址" onChange={(event) => setBaseUrl(event.target.value)} required type="url" value={baseUrl} /></label><label><span>密钥来源</span><select aria-label="密钥来源" onChange={(event) => { setSecretMode(event.target.value as "keychain" | "environment"); setSecretValue(""); }} value={secretMode}><option value="keychain">系统 Keychain</option><option value="environment">环境变量</option></select></label><label><span>{secretMode === "keychain" ? "API Key" : "环境变量名称"}</span><input aria-label="模型服务密钥" autoComplete="new-password" onChange={(event) => setSecretValue(event.target.value)} pattern={secretMode === "environment" ? "[A-Z_][A-Z0-9_]{0,127}" : undefined} placeholder={secretMode === "keychain" ? "仅发送一次并写入系统密钥库" : "例如 OPENAI_API_KEY"} required type={secretMode === "keychain" ? "password" : "text"} value={secretValue} /></label><small>{secretMode === "keychain" ? "密钥由 Server 写入操作系统 Keychain，数据库和前端响应只保留脱敏引用。" : "Server 只保存环境变量名称，真实值必须在启动 Server 前注入。"}</small><div><button type="button" onClick={() => setFormOpen(false)}>取消</button><button className="primary" disabled={state.saving}>保存服务</button></div></form>}
+    {state.error && <div className="workspace-error"><span>{state.error}</span><button onClick={() => void state.reload()}>重试</button></div>}
+    <div className="model-layout"><div className="profile-list">{state.loading && <p>正在读取模型服务…</p>}{state.profiles.map((profile) => <button className={profile.id === state.selectedProfileId ? "active" : ""} key={profile.id} onClick={() => state.setSelectedProfileId(profile.id)}><Server /><span><strong>{profile.displayName}</strong><small>{profile.baseUrl}</small></span><i className={profile.connection.status}>{profile.connection.status === "succeeded" ? "已连接" : profile.connection.status === "failed" ? "失败" : "未测试"}</i></button>)}</div>
+      {selectedProfile && <div className="model-catalog"><header><span><strong>{selectedProfile.displayName}</strong><small>{selectedProfile.secret.maskedValue}</small></span><button disabled={state.saving} onClick={() => void state.testConnection(selectedProfile.id)}>测试连接</button></header><div className="catalog-heading"><span>可用模型</span><button aria-label="刷新模型列表" disabled={state.saving} onClick={() => void state.refreshCatalog()}><RefreshCw /></button></div><div className="catalog-list">{state.catalog?.entries.map((entry) => { const current = state.currentSelection?.profileId === entry.profileId && state.currentSelection.modelName === entry.modelName; return <button className={current ? "active" : ""} key={entry.id} onClick={() => void state.selectModel({ profileId: entry.profileId, modelName: entry.modelName })}><span><strong>{entry.modelName}</strong><small>{entry.source === "manual" ? "手动" : "发现"}</small></span><i>{current ? "当前模型" : "选择"}</i></button>; })}{state.catalog?.entries.length === 0 && <p>尚未发现模型，可以刷新或手动添加。</p>}</div><form className="manual-model" onSubmit={(event) => void submitModel(event)}><input aria-label="手动模型名称" onChange={(event) => setManualModel(event.target.value)} placeholder="例如 gpt-4.1" required value={manualModel} /><button disabled={state.saving}>添加</button></form></div>}
+    </div>
+  </section>;
+}

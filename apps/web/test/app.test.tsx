@@ -14,7 +14,11 @@ describe("LLM Harness Web", () => {
       const path = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       return Promise.resolve(new Response(JSON.stringify({
         apiVersion: API_VERSION,
-        data: path.endsWith("current-workspace") ? null : [],
+        data: path.endsWith("current-workspace")
+          ? null
+          : path.endsWith("current-model-selection")
+            ? { selection: null, updatedAt: "2026-08-19T00:00:00.000Z" }
+            : [],
       })));
     });
     render(<App />);

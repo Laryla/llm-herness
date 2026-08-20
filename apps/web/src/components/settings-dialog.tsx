@@ -4,14 +4,16 @@ import { useState } from "react";
 
 import { WorkspaceSettings } from "../domains/workspaces/components/workspace-settings.js";
 import type { useWorkspaces } from "../domains/workspaces/model/use-workspaces.js";
+import { ModelSettings } from "../domains/models/components/model-settings.js";
+import type { useModels } from "../domains/models/model/use-models.js";
 
-type SettingsSection = "tools" | "workspaces";
+type SettingsSection = "models" | "tools" | "workspaces";
 
 /** 应用级设置外壳；各领域只提供自己的设置内容，不感知模态框导航。 */
-export function SettingsDialog({ onClose, workspaces }: { onClose: () => void; workspaces: ReturnType<typeof useWorkspaces> }) {
-  const [section, setSection] = useState<SettingsSection>("tools");
-  const isTools = section === "tools";
-  return <Dialog.Root onOpenChange={(open) => { if (!open) onClose(); }} open><Dialog.Portal><Dialog.Overlay className="settings-backdrop" /><Dialog.Content className="settings-modal"><aside><header><b>H</b><span><Dialog.Title id="settings-title">设置</Dialog.Title><Dialog.Description>Harness 配置</Dialog.Description></span></header><nav><button disabled><Bot />模型服务</button><button className={isTools ? "active" : ""} onClick={() => setSection("tools")}><Hammer />工具注册 <b>2</b></button><button className={!isTools ? "active" : ""} onClick={() => setSection("workspaces")}><SquareStack />工作空间</button><button disabled><Settings />运行参数</button></nav><footer><small>Harness v0.1.0</small></footer></aside><main><header><div><strong>{isTools ? "工具注册" : "工作空间"}</strong><small>{isTools ? "管理 Server 启动时加载的工具" : "管理文件夹与当前工作空间"}</small></div><Dialog.Close aria-label="关闭设置"><X /></Dialog.Close></header>{isTools ? <ToolSettings /> : <WorkspaceSettings state={workspaces} />}</main></Dialog.Content></Dialog.Portal></Dialog.Root>;
+export function SettingsDialog({ models, onClose, workspaces }: { models: ReturnType<typeof useModels>; onClose: () => void; workspaces: ReturnType<typeof useWorkspaces> }) {
+  const [section, setSection] = useState<SettingsSection>("models");
+  const title = section === "models" ? "模型服务" : section === "tools" ? "工具注册" : "工作空间";
+  return <Dialog.Root onOpenChange={(open) => { if (!open) onClose(); }} open><Dialog.Portal><Dialog.Overlay className="settings-backdrop" /><Dialog.Content className="settings-modal"><aside><header><b>H</b><span><Dialog.Title id="settings-title">设置</Dialog.Title><Dialog.Description>Harness 配置</Dialog.Description></span></header><nav><button className={section === "models" ? "active" : ""} onClick={() => setSection("models")}><Bot />模型服务</button><button className={section === "tools" ? "active" : ""} onClick={() => setSection("tools")}><Hammer />工具注册 <b>2</b></button><button className={section === "workspaces" ? "active" : ""} onClick={() => setSection("workspaces")}><SquareStack />工作空间</button><button disabled><Settings />运行参数</button></nav><footer><small>Harness v0.1.0</small></footer></aside><main><header><div><strong>{title}</strong><small>{section === "models" ? "配置服务并选择下一个 Turn 使用的模型" : section === "tools" ? "管理 Server 启动时加载的工具" : "管理文件夹与当前工作空间"}</small></div><Dialog.Close aria-label="关闭设置"><X /></Dialog.Close></header>{section === "models" ? <ModelSettings state={models} /> : section === "tools" ? <ToolSettings /> : <WorkspaceSettings state={workspaces} />}</main></Dialog.Content></Dialog.Portal></Dialog.Root>;
 }
 
 function ToolSettings() {

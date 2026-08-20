@@ -1,7 +1,7 @@
 import type { Conversation, Message, Turn } from "@llm-harness/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { listConversations, listMessages, listTurns } from "../api/conversation-api.js";
+import { createConversation, listConversations, listMessages, listTurns } from "../api/conversation-api.js";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Conversation 请求失败";
@@ -69,5 +69,15 @@ export function useConversations(workspaceId: string | null) {
     setSelectedId(null); setMessages([]); setTurns([]); setError(null);
   }, []);
 
-  return { beginNewConversation, conversations, error, loadingConversation, loadingList, messages, reloadConversation, reloadList, selectedConversation, selectedId, selectConversation: setSelectedId, turns };
+  /** 首次发送时延迟创建 Conversation，避免用户打开空白页就产生无内容记录。 */
+  const ensureConversation = useCallback(async (firstMessage: string) => {
+    if (selectedConversation) return selectedConversation;
+    if (!workspaceId) throw new Error("请先选择工作空间");
+    const created = await createConversation({ workspaceId, firstMessage, instructions: "" });
+    setConversations((items) => [created, ...items]);
+    setSelectedId(created.id);
+    return created;
+  }, [selectedConversation, workspaceId]);
+
+  return { beginNewConversation, conversations, ensureConversation, error, loadingConversation, loadingList, messages, reloadConversation, reloadList, selectedConversation, selectedId, selectConversation: setSelectedId, turns };
 }
