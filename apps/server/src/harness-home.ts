@@ -9,6 +9,7 @@ const persistedSettingsSchema = z
   .object({
     databaseProvider: databaseProviderSchema,
     maxIterations: z.number().int().min(1).max(100),
+    secrets: z.record(z.string(), z.string()).optional(),
   })
   .strict();
 
@@ -68,6 +69,7 @@ export async function initializeHarnessHome(
     {
       databaseProvider: config.database.provider,
       maxIterations: config.maxIterations,
+      secrets: {},
     },
     null,
     2,

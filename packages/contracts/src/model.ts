@@ -8,7 +8,7 @@ import {
 
 export const secretReferenceSchema = z
   .object({
-    source: z.enum(["keychain", "environment"]),
+    source: z.enum(["local", "keychain", "environment"]),
     reference: z.string().min(1),
     maskedValue: z.string().min(1),
   })

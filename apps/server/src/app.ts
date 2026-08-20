@@ -28,6 +28,7 @@ export interface CreateAppOptions {
   };
   secretStores?: {
     readonly keychain: SecretStore;
+    readonly local: SecretStore;
     readonly environment: SecretStore;
     readonly writable: SecretStore;
   };

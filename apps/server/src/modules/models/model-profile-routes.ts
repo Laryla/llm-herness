@@ -70,7 +70,7 @@ export function registerModelProfileRoutes(
     data: await service.list(),
   }));
 
-  // 创建 Profile，并把真实密钥写入系统密钥库或绑定环境变量引用。
+  // 创建 Profile，并把真实密钥写入本地 config.json 或绑定环境变量引用。
   app.post("/api/v1/model-profiles", async (request, reply) => {
     const parsed = createModelProfileRequestSchema.safeParse(request.body);
     if (!parsed.success) {

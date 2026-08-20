@@ -98,7 +98,7 @@ llm-harness/
 
 ### infrastructure/secrets
 
-提供 SecretStore，优先连接 macOS Keychain、Windows Credential Manager 或 Linux Secret Service，并支持环境变量回退。
+提供 SecretStore，V1 默认把模型密钥明文保存到 Harness Home 的 `config.json`，并支持环境变量引用。
 
 ## REST 与 WebSocket
 

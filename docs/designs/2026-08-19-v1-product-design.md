@@ -47,7 +47,7 @@ Model Profile 包含：
 
 - 第一版认证固定为 `Authorization: Bearer <API_KEY>`。
 - 不支持 Azure OpenAI 特殊路径、自定义 Header、Query 参数或代理配置。
-- API Key 不得明文写入数据库；默认进入操作系统密钥库，无密钥库环境可通过环境变量注入。
+- API Key 不写入数据库；单用户 V1 默认明文写入 Harness Home 的 `config.json`，也可通过环境变量注入。
 - 模型列表优先从 OpenAI 兼容的 `/v1/models` 获取，并允许手动补充；列表存在不代表模型一定可调用。
 - Harness Instance 只有一个共享的 Current Model Selection。
 - 修改 Current Model Selection 只影响之后创建的 Turn，不影响任何活动或历史 Turn。

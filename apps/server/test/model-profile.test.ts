@@ -14,7 +14,7 @@ class MemorySecretStore implements SecretStore {
   readonly values = new Map<string, string>();
 
   constructor(
-    readonly source: "keychain" | "environment",
+    readonly source: "local" | "keychain" | "environment",
     values: Record<string, string> = {},
   ) {
     for (const [reference, value] of Object.entries(values)) {
@@ -76,20 +76,22 @@ async function createTestContext(fetchImplementation: typeof fetch = fetch) {
   });
   await database.connect();
   const keychain = new MemorySecretStore("keychain");
+  const local = new MemorySecretStore("local");
   const environment = new MemorySecretStore("environment", {
     MODEL_API_KEY: "env-model-secret",
   });
   const service = new ModelProfileService(
     database.client,
-    { keychain, environment, writable: keychain },
+    { keychain, local, environment, writable: local },
     fetchImplementation,
   );
   return {
     database,
     environment,
-    keychain,
+    keychain: local,
+    local,
     service,
-    stores: { keychain, environment, writable: keychain },
+    stores: { keychain, local, environment, writable: local },
   };
 }
 
@@ -245,7 +247,7 @@ describe("Model Profile", () => {
       apiVersion: "v1",
       data: {
         displayName: "REST Profile",
-        secret: { source: "keychain" },
+        secret: { source: "local" },
       },
     });
     expect(JSON.stringify(created.json())).not.toContain("rest-secret");

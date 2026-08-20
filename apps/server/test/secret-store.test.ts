@@ -1,8 +1,13 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { sanitizeForLogging, maskSecret } from "../src/infrastructure/secrets/secret-redaction.js";
 import {
   EnvironmentSecretStore,
+  LocalJsonSecretStore,
   resolveSecret,
   selectSecretStore,
   SystemKeychainSecretStore,
@@ -11,7 +16,23 @@ import {
 } from "../src/infrastructure/secrets/secret-store.js";
 
 describe("SecretStore", () => {
-  it("通过标准输入写入 macOS 密钥库，不把密钥放入进程参数", async () => {
+  it("在 config.json 中明文保存、读取和删除本地密钥", async () => {
+    const root = await mkdtemp(join(tmpdir(), "llm-harness-local-secret-"));
+    const configFile = join(root, "config.json");
+    await writeFile(configFile, '{"databaseProvider":"sqlite","maxIterations":8,"secrets":{}}\n', { mode: 0o600 });
+    const store = new LocalJsonSecretStore(configFile);
+    try {
+      await store.set("profile_test", "sk-local-secret");
+      await expect(store.get("profile_test")).resolves.toBe("sk-local-secret");
+      expect(JSON.parse(await readFile(configFile, "utf8"))).toMatchObject({ secrets: { profile_test: "sk-local-secret" } });
+      await store.delete("profile_test");
+      await expect(store.get("profile_test")).resolves.toBeNull();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("通过 security 的 -w 参数写入 macOS 密钥库，不进入交互提示", async () => {
     const secret = "sk-super-secret";
     const runner = vi.fn<CommandRunner>().mockResolvedValue({
       exitCode: 0,
@@ -31,10 +52,10 @@ describe("SecretStore", () => {
         "llm-harness",
         "-U",
         "-w",
+        secret,
       ],
-      secret,
+      undefined,
     );
-    expect(runner.mock.calls[0]?.[1]).not.toContain(secret);
   });
 
   it("读取和删除系统密钥", async () => {
@@ -95,6 +116,7 @@ describe("SecretStore", () => {
 
   it("按 SecretReference 来源解析密钥且缺失时返回结构化错误", async () => {
     const stores = {
+      local: new EnvironmentSecretStore({}),
       keychain: new EnvironmentSecretStore({}),
       environment: new EnvironmentSecretStore({ MODEL_KEY: "resolved" }),
     } as const;

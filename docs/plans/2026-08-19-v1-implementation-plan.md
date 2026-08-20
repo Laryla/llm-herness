@@ -146,7 +146,7 @@ yarn start
 ### SecretStore
 
 - 定义 SecretStore 接口。
-- 实现操作系统密钥库适配器和环境变量回退。
+- 实现本地 `config.json` 明文密钥存储和环境变量引用。
 - Model Profile 只持久化 Secret 引用和脱敏值。
 - 日志与错误序列化统一执行密钥清理。
 

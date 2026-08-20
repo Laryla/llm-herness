@@ -169,7 +169,7 @@ describe("Agent Runtime Gateway", () => {
     const app = createApp({
       database,
       maxSteps: 8,
-      secretStores: { keychain: secrets, environment: secrets, writable: secrets },
+      secretStores: { keychain: secrets, local: secrets, environment: secrets, writable: secrets },
     });
     harnessApps.push(app);
     await app.ready();

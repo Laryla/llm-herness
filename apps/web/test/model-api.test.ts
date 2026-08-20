@@ -9,7 +9,7 @@ describe("Model API", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("创建 Profile 时只通过请求发送一次真实密钥", async () => {
-    const profile = { id: "profile_test", displayName: "OpenAI", baseUrl: "https://api.openai.com/v1", secret: { source: "keychain", reference: "profile_test", maskedValue: "sk-***" }, connection: { status: "untested" }, createdAt: "2026-08-19T00:00:00.000Z", updatedAt: "2026-08-19T00:00:00.000Z" };
+    const profile = { id: "profile_test", displayName: "OpenAI", baseUrl: "https://api.openai.com/v1", secret: { source: "local", reference: "profile_test", maskedValue: "sk-***" }, connection: { status: "untested" }, createdAt: "2026-08-19T00:00:00.000Z", updatedAt: "2026-08-19T00:00:00.000Z" };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ apiVersion: API_VERSION, data: profile }), { status: 201 }));
     const input = { displayName: "OpenAI", baseUrl: profile.baseUrl, secretValue: "sk-secret" };
 

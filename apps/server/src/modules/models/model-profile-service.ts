@@ -43,6 +43,7 @@ const modelsResponseSchema = z
 
 export interface ModelSecretStores {
   readonly keychain: SecretStore;
+  readonly local: SecretStore;
   readonly environment: SecretStore;
   readonly writable: SecretStore;
 }
@@ -170,7 +171,7 @@ export class ModelProfileService {
     return records.map(serializeProfile);
   }
 
-  /** 创建 Model Profile，并将真实密钥写入系统密钥库或绑定环境变量引用。 */
+  /** 创建 Model Profile，并将真实密钥写入本地 config.json 或绑定环境变量引用。 */
   async create(input: CreateModelProfileRequest): Promise<ModelProfile> {
     const id = createId("profile");
     const secret = await this.prepareNewSecret(id, input);
@@ -196,8 +197,8 @@ export class ModelProfileService {
       );
       return serializeProfile(record);
     } catch (error) {
-      if (secret.source === "keychain") {
-        await this.stores.keychain.delete(secret.reference).catch(() => undefined);
+      if (secret.source !== "environment") {
+        await this.stores[secret.source].delete(secret.reference).catch(() => undefined);
       }
       throw error;
     }
@@ -211,10 +212,10 @@ export class ModelProfileService {
     const existing = await this.findProfile(id);
     let secret: SecretReference | undefined;
     if (input.secretValue !== undefined) {
-      if (this.stores.writable.source !== "keychain") {
+      if (this.stores.writable.source !== "local") {
         throw new ModelProfileServiceError(
           "secret_store_unavailable",
-          "系统密钥库不可用，请改用环境变量引用",
+          "本地密钥配置不可用，请改用环境变量引用",
         );
       }
       await this.stores.writable.set(id, input.secretValue);
@@ -299,11 +300,11 @@ export class ModelProfileService {
     }
     if (
       secret &&
-      existing.secretSource === "keychain" &&
-      (secret.source !== "keychain" ||
+      (existing.secretSource === "keychain" || existing.secretSource === "local") &&
+      (secret.source !== existing.secretSource ||
         existing.secretReference !== secret.reference)
     ) {
-      await this.stores.keychain
+      await this.stores[existing.secretSource]
         .delete(existing.secretReference)
         .catch(() => undefined);
     }
@@ -337,8 +338,8 @@ export class ModelProfileService {
       }
       await transaction.modelProfile.delete({ where: { id } });
     });
-    if (profile.secretSource === "keychain") {
-      await this.stores.keychain
+    if (profile.secretSource === "keychain" || profile.secretSource === "local") {
+      await this.stores[profile.secretSource]
         .delete(profile.secretReference)
         .catch(() => undefined);
     }
@@ -645,15 +646,15 @@ export class ModelProfileService {
         maskedValue: maskSecret(value),
       };
     }
-    if (this.stores.writable.source !== "keychain") {
+    if (this.stores.writable.source !== "local") {
       throw new ModelProfileServiceError(
         "secret_store_unavailable",
-        "系统密钥库不可用，请改用环境变量引用",
+        "本地密钥配置不可用，请改用环境变量引用",
       );
     }
     await this.stores.writable.set(id, input.secretValue as string);
     return {
-      source: "keychain",
+      source: "local",
       reference: id,
       maskedValue: maskSecret(input.secretValue as string),
     };
@@ -664,7 +665,7 @@ export class ModelProfileService {
     secretSource: string;
     secretReference: string;
   }): Promise<{ modelNames: string[]; latencyMs: number }> {
-    const store = this.stores[profile.secretSource as "keychain" | "environment"];
+    const store = this.stores[profile.secretSource as "local" | "keychain" | "environment"];
     const secret = await store.get(profile.secretReference);
     if (secret === null) {
       throw new ModelProfileServiceError("secret_not_found", "找不到模型密钥");

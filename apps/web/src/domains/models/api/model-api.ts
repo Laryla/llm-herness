@@ -18,7 +18,7 @@ export function listModelProfiles(): Promise<ModelProfile[]> {
   return requestApi("/api/v1/model-profiles", z.array(modelProfileSchema));
 }
 
-/** secretValue 只发送给 Server 写入系统密钥库，响应永远只有脱敏引用。 */
+/** secretValue 只发送给 Server 写入本地 config.json，响应永远只有脱敏引用。 */
 export function createModelProfile(input: CreateModelProfileRequest): Promise<ModelProfile> {
   return requestApi("/api/v1/model-profiles", modelProfileSchema, { method: "POST", body: JSON.stringify(input) });
 }

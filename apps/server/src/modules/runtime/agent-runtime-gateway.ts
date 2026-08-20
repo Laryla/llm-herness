@@ -334,7 +334,7 @@ export class AgentRuntimeGateway implements RuntimeGateway {
     if (!entry) {
       throw new RuntimeGatewayError("model_not_found", "选择的模型不在 Model Catalog 中");
     }
-    const source = entry.profile.secretSource as "keychain" | "environment";
+    const source = entry.profile.secretSource as "local" | "keychain" | "environment";
     const apiKey = await this.stores[source].get(entry.profile.secretReference);
     if (apiKey === null) {
       throw new RuntimeGatewayError("secret_not_found", "找不到模型密钥");

@@ -6,14 +6,14 @@
 
 ## 存储实现
 
-- macOS 使用 Keychain，调用系统 `security` 命令；写入值通过标准输入传递，不进入进程参数。
-- Linux 使用 Secret Service，调用 `secret-tool`，写入值同样通过标准输入传递。
-- Windows 使用 Credential Manager，通过 PowerShell 调用原生 `CredWriteW`、`CredReadW`、`CredDeleteW` 与 `CredFree`；密钥通过标准输入传递。
-- 系统密钥库不可用时回退到环境变量。环境变量存储只读，变量名就是密钥引用。
+- 单用户 V1 默认使用 `LocalJsonSecretStore`，把密钥写入 Harness Home 的 `config.json` 中的 `secrets` 对象。
+- `config.json` 创建和重写时使用 `0600` 权限，但内容仍是明文，本机拥有文件读取权限的进程可以看到密钥。
+- 环境变量存储继续作为可选方案。该方式只保存变量名，真实值由 Server 运行环境提供。
+- `keychain` 来源仅为已有开发数据保留兼容读取，不再用于新建或更新 Profile。
 
 ## 生命周期
 
-系统密钥库实现支持写入、读取和删除。环境变量由 Harness Server 外部管理，因此 Server 只能读取，不能修改或删除。删除 Model Profile 时，只有 `source=keychain` 的引用需要同步删除。
+本地 JSON 存储支持写入、读取和删除。删除使用 `source=local` 的 Model Profile 时同步删除 `secrets` 中的对应字段。环境变量由 Harness Server 外部管理，因此 Server 只能读取，不能修改或删除。
 
 ## 日志安全
 

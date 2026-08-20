@@ -7,7 +7,7 @@ import { createDatabase } from "./infrastructure/database/database.js";
 import { migrateDatabase } from "./infrastructure/database/migrate.js";
 import {
   EnvironmentSecretStore,
-  selectSecretStore,
+  LocalJsonSecretStore,
   SystemKeychainSecretStore,
 } from "./infrastructure/secrets/secret-store.js";
 import { interruptActiveTurns } from "./modules/conversations/conversation-service.js";
@@ -73,13 +73,10 @@ try {
   console.info(interrupted, "遗留活动 Turn 与 Step 中断恢复完成");
 
   const keychainSecretStore = new SystemKeychainSecretStore();
+  const localSecretStore = new LocalJsonSecretStore(harnessHomePaths.configFile);
   const environmentSecretStore = new EnvironmentSecretStore();
-  const writableSecretStore = await selectSecretStore(
-    keychainSecretStore,
-    environmentSecretStore,
-  );
   console.info(
-    { secretStoreSource: writableSecretStore.source },
+    { secretStoreSource: localSecretStore.source },
     "SecretStore 初始化完成",
   );
 
@@ -89,8 +86,9 @@ try {
     maxSteps: config.maxIterations,
     secretStores: {
       keychain: keychainSecretStore,
+      local: localSecretStore,
       environment: environmentSecretStore,
-      writable: writableSecretStore,
+      writable: localSecretStore,
     },
     staticRoot,
   });

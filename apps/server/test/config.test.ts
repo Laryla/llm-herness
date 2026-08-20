@@ -73,6 +73,7 @@ describe("Harness Home", () => {
     expect(saved).toEqual({
       databaseProvider: "sqlite",
       maxIterations: 8,
+      secrets: {},
     });
     expect(JSON.stringify(saved)).not.toContain("DATABASE_URL");
   });

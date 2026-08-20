@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import type { SecretReference } from "@llm-harness/contracts";
@@ -63,6 +64,71 @@ function validateReference(reference: string): void {
       "secret_store_operation_failed",
       "密钥引用长度必须在 1–200 个字符之间",
     );
+  }
+}
+
+/** 把密钥明文保存在 Harness Home/config.json 的 secrets 字段中。 */
+export class LocalJsonSecretStore implements SecretStore {
+  readonly source = "local" as const;
+  private writeChain = Promise.resolve();
+
+  constructor(private readonly configFile: string) {}
+
+  isAvailable(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
+  async get(reference: string): Promise<string | null> {
+    validateReference(reference);
+    const config = await this.readConfig();
+    return config.secrets?.[reference] ?? null;
+  }
+
+  set(reference: string, value: string): Promise<void> {
+    validateReference(reference);
+    if (value.length === 0) {
+      return Promise.reject(new SecretStoreError("secret_store_operation_failed", "密钥值不能为空"));
+    }
+    return this.enqueueWrite(async () => {
+      const config = await this.readConfig();
+      await this.writeConfig({ ...config, secrets: { ...config.secrets, [reference]: value } });
+    });
+  }
+
+  delete(reference: string): Promise<void> {
+    validateReference(reference);
+    return this.enqueueWrite(async () => {
+      const config = await this.readConfig();
+      const secrets = { ...config.secrets };
+      delete secrets[reference];
+      await this.writeConfig({ ...config, secrets });
+    });
+  }
+
+  private async readConfig(): Promise<Record<string, unknown> & { secrets?: Record<string, string> }> {
+    try {
+      const value = JSON.parse(await readFile(this.configFile, "utf8")) as Record<string, unknown>;
+      const secrets = typeof value.secrets === "object" && value.secrets !== null
+        ? Object.fromEntries(Object.entries(value.secrets).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+        : {};
+      return { ...value, secrets };
+    } catch (error) {
+      throw new SecretStoreError("secret_store_operation_failed", `读取本地密钥配置失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
+  }
+
+  private async writeConfig(config: Record<string, unknown>): Promise<void> {
+    try {
+      await writeFile(this.configFile, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    } catch (error) {
+      throw new SecretStoreError("secret_store_operation_failed", `写入本地密钥配置失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
+  }
+
+  private enqueueWrite(operation: () => Promise<void>): Promise<void> {
+    const next = this.writeChain.then(operation, operation);
+    this.writeChain = next.catch(() => undefined);
+    return next;
   }
 }
 
@@ -134,36 +200,39 @@ export class SystemKeychainSecretStore implements SecretStore {
         "密钥值不能为空",
       );
     }
-    const result = await this.execute(
-      this.platform === "darwin"
-        ? [
-            "security",
-            [
-              "add-generic-password",
-              "-a",
-              reference,
-              "-s",
-              this.service,
-              "-U",
-              "-w",
-            ],
-          ]
-        : this.platform === "win32"
-          ? this.windowsCommand("set", reference)
-          : [
-            "secret-tool",
-            [
-              "store",
-              "--label",
-              `LLM Harness: ${reference}`,
-              "service",
-              this.service,
-              "reference",
-              reference,
-            ],
-            ],
-      value,
-    );
+    // macOS security 的 `-w` 不从 stdin 读取；缺少紧随其后的值会进入交互提示并挂起 HTTP 请求。
+    // Linux secret-tool 与 Windows 脚本支持 stdin，因此继续避免把密钥放进它们的参数列表。
+    const result = this.platform === "darwin"
+      ? await this.execute([
+          "security",
+          [
+            "add-generic-password",
+            "-a",
+            reference,
+            "-s",
+            this.service,
+            "-U",
+            "-w",
+            value,
+          ],
+        ])
+      : await this.execute(
+          this.platform === "win32"
+            ? this.windowsCommand("set", reference)
+            : [
+                "secret-tool",
+                [
+                  "store",
+                  "--label",
+                  `LLM Harness: ${reference}`,
+                  "service",
+                  this.service,
+                  "reference",
+                  reference,
+                ],
+              ],
+          value,
+        );
     if (result.exitCode !== 0) {
       throw new SecretStoreError(
         "secret_store_operation_failed",
