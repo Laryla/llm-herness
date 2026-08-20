@@ -12,9 +12,12 @@ const confirmation: Extract<ServerEvent, { type: "tool.confirmation_requested" }
 describe("Conversation History", () => {
   it("展示增量文本并把工具确认操作交给 Runtime", () => {
     const onConfirmTool = vi.fn();
-    render(<ConversationHistory confirmations={[confirmation]} liveText={{ [turn.id]: "正在处理" }} loading={false} messages={[]} onConfirmTool={onConfirmTool} onSelectTrace={vi.fn()} selectedTraceTurnId={turn.id} turns={[turn]} />);
+    const onSelectTrace = vi.fn();
+    render(<ConversationHistory confirmations={[confirmation]} liveText={{ [turn.id]: "正在处理" }} loading={false} messages={[]} onConfirmTool={onConfirmTool} onSelectTrace={onSelectTrace} selectedTraceTurnId={turn.id} turns={[turn]} />);
 
     expect(screen.getByText(/正在处理/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Turn 1.*等待确认.*查看 Trace/ }));
+    expect(onSelectTrace).toHaveBeenCalledWith(turn.id);
     fireEvent.click(screen.getByRole("button", { name: "确认执行" }));
     expect(onConfirmTool).toHaveBeenCalledWith(confirmation, true);
   });
